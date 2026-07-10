@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AgentStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  PAUSED
+  WAITING_APPROVAL
+  COMPLETED
+  FAILED
+  CANCELLED
+  ROLLED_BACK
+}
+
+enum TriggerType {
+  MANUAL
+  SCHEDULED
+  EVENT
+  WEBHOOK
+  ERP
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+enum PluginType {
+  ERP
+  MCP
+  NOTIFICATION
+  AI
+  STORAGE
+  AUTHENTICATION
+  COMMUNICATION
+}
+
+enum PluginStatus {
+  INSTALLED
+  ACTIVE
+  INACTIVE
+  ERROR
+}
+
+enum McpServerStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum CredentialType {
+  API_KEY
+  OAUTH
+  CERTIFICATE
+  BASIC_AUTH
+  CUSTOM
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum ScheduleType {
+  CRON
+  ONE_TIME
+  RECURRING
+  EVENT
+  WEBHOOK
+}
+
+model AppConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  encrypted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Agent {
+  id            String      @id @default(uuid())
+  agentId       String      @unique
+  name          String
+  description   String?
+  version       Int         @default(1)
+  definition    Json
+  checksum      String
+  signature     String?
+  status        AgentStatus @default(ACTIVE)
+  permission    Json?
+  settings      Json?
+  isActive      Boolean     @default(true)
+  deployedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  executions    Execution[]
+  schedules     Schedule[]
+}
+
+model Execution {
+  id            String          @id @default(uuid())
+  executionId   String          @unique
+  agentId       String
+  agent         Agent           @relation(fields: [agentId], references: [agentId])
+  status        ExecutionStatus @default(PENDING)
+  trigger       TriggerType
+  input         Json?
+  output        Json?
+  error         Json?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  checkpoints   Checkpoint[]
+  logs          ExecutionLog[]
+}
+
+model Checkpoint {
+  id          String   @id @default(uuid())
+  executionId String
+  execution   Execution @relation(fields: [executionId], references: [id])
+  nodeId      String
+  nodeType    String
+  state       Json
+  variables   Json?
+  createdAt   DateTime @default(now())
+}
+
+model ExecutionLog {
+  id          String   @id @default(uuid())
+  executionId String
+  execution   Execution @relation(fields: [executionId], references: [id])
+  nodeId      String?
+  nodeType    String?
+  level       LogLevel @default(INFO)
+  message     String
+  metadata    Json?
+  timestamp   DateTime @default(now())
+}
+
+model Schedule {
+  id          String       @id @default(uuid())
+  agentId     String
+  agent       Agent        @relation(fields: [agentId], references: [agentId])
+  name        String
+  type        ScheduleType
+  cron        String?
+  startAt     DateTime?
+  endAt       DateTime?
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  isActive    Boolean      @default(true)
+  config      Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Plugin {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  version     String
+  type        PluginType
+  manifest    Json
+  config      Json?
+  status      PluginStatus @default(INSTALLED)
+  isBuiltin   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model McpServer {
+  id                String          @id @default(uuid())
+  name              String          @unique
+  url               String
+  description       String?
+  config            Json?
+  status            McpServerStatus @default(CONNECTED)
+  lastHealthCheckAt DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  tools             McpTool[]
+}
+
+model McpTool {
+  id          String   @id @default(uuid())
+  serverId    String
+  server      McpServer @relation(fields: [serverId], references: [id])
+  name        String
+  description String?
+  schema      Json
+  createdAt   DateTime @default(now())
+  @@unique([serverId, name])
+}
+
+model CredentialVault {
+  id        String         @id @default(uuid())
+  name      String
+  type      CredentialType
+  value     String
+  metadata  Json?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String?
+  passwordHash String
+  role         UserRole  @default(OPERATOR)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String
+  entityType String
+  entityId   String?
+  userId     String?
+  metadata   Json?
+  ipAddress  String?
+  timestamp  DateTime @default(now())
+}
+
+model AiUsage {
+  id          String   @id @default(uuid())
+  executionId String?
+  agentId     String?
+  userId      String?
+  provider    String
+  model       String
+  tokensIn    Int      @default(0)
+  tokensOut   Int      @default(0)
+  creditsUsed Float    @default(0)
+  duration    Int      @default(0)
+  timestamp   DateTime @default(now())
+}

@@ -1,0 +1,9 @@
+node_modules/
+.next/
+electron-dist/
+dist/
+*.ico
+*.icns
+*.tsbuildinfo
+.env
+.env.local
