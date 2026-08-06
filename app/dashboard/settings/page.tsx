@@ -1,17 +1,17 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import { getConfig, setConfigField, getAppVersion, syncDeviceConfig, clearCredentials } from "@/lib/device-config"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { getConfig, setConfigField, getAppVersion, syncDeviceConfig, clearCredentials, runtimeCall } from "@/lib/device-config";
 
 function formatLabel(key: string) {
-  return key.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase()).trim()
+  return key.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase()).trim();
 }
 
 function formatSyncedAt(iso: string) {
-  if (!iso) return "Never"
-  try { return new Date(iso).toLocaleString() } catch { return iso }
+  if (!iso) return "Never";
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -19,7 +19,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-900">
       {children}
     </h2>
-  )
+  );
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -28,12 +28,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span className="text-sm text-slate-500">{label}</span>
       <span className="text-sm font-medium text-slate-900 text-right">{children}</span>
     </div>
-  )
+  );
 }
 
 function ConfigSection({ title, data }: { title: string; data: Record<string, any> }) {
-  const entries = Object.entries(data)
-  if (entries.length === 0) return null
+  const entries = Object.entries(data);
+  if (entries.length === 0) return null;
   return (
     <div>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</h3>
@@ -46,16 +46,16 @@ function ConfigSection({ title, data }: { title: string; data: Record<string, an
                 ? value
                   ? <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">On</span>
                   : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">Off</span>
-                : String(value ?? "—")}
+                : String(value ?? "\u2014")}
             </span>
           </div>
         ))}
       </div>
     </div>
-  )
+  );
 }
 
-type AuthStatus = "idle" | "checking" | "ok" | "error"
+type AuthStatus = "idle" | "checking" | "ok" | "error";
 
 const NAV: { id: string; label: string; danger?: boolean }[] = [
   { id: "connection",     label: "Server Connection" },
@@ -65,170 +65,199 @@ const NAV: { id: string; label: string; danger?: boolean }[] = [
   { id: "device-config",  label: "Device Config" },
   { id: "about",          label: "About" },
   { id: "danger",         label: "Danger Zone", danger: true },
-]
+];
+
+interface ConnectionState {
+  serverUrl: string;
+  saved: boolean;
+}
+
+interface RegistrationState {
+  isRegistered: boolean;
+  tenantId: string;
+  deviceId: string;
+  deviceToken: string;
+  scopes: string[];
+  registeredAt: string;
+}
+
+interface DeviceInfoState {
+  deviceName: string;
+  deviceType: string;
+  deviceCode: string;
+  storeName: string;
+}
+
+interface DeviceConfigState {
+  deviceConfig: Record<string, any> | null;
+  syncedAt: string;
+  syncing: boolean;
+  syncError: string;
+  syncOk: boolean;
+}
+
+interface AuthState {
+  status: AuthStatus;
+  verifyResult: any;
+  lastChecked: Date | null;
+}
 
 export default function SettingsPage() {
-  const router = useRouter()
+  const router = useRouter();
 
-  const [serverUrl, setServerUrl]         = useState("")
-  const [appVersion, setAppVersion]       = useState("–")
-  const [saved, setSaved]                 = useState(false)
-  const [loading, setLoading]             = useState(true)
-  const [isRegistered, setIsRegistered]   = useState(false)
-  const [activeSection, setActiveSection] = useState("connection")
-
-  const [tenantId, setTenantId]           = useState("")
-  const [deviceId, setDeviceId]           = useState("")
-  const [deviceToken, setDeviceToken]     = useState("")
-  const [scopes, setScopes]               = useState<string[]>([])
-  const [registeredAt, setRegisteredAt]   = useState("")
-
-  const [deviceName, setDeviceName]       = useState("")
-  const [deviceType, setDeviceType]       = useState("")
-  const [deviceCode, setDeviceCode]       = useState("")
-  const [storeName, setStoreName]         = useState("")
-
-  const [syncing, setSyncing]             = useState(false)
-  const [syncError, setSyncError]         = useState("")
-  const [syncOk, setSyncOk]               = useState(false)
-  const [deviceConfig, setDeviceConfig]   = useState<Record<string, any> | null>(null)
-  const [syncedAt, setSyncedAt]           = useState("")
-  const autoSyncDone = useRef(false)
-
-  const [authStatus, setAuthStatus]       = useState<AuthStatus>("idle")
-  const [verifyResult, setVerifyResult]   = useState<any>(null)
-  const [lastChecked, setLastChecked]     = useState<Date | null>(null)
+  const [connection, setConnection] = useState<ConnectionState>({ serverUrl: "", saved: false });
+  const [reg, setReg] = useState<RegistrationState>({
+    isRegistered: false, tenantId: "", deviceId: "", deviceToken: "",
+    scopes: [], registeredAt: "",
+  });
+  const [device, setDevice] = useState<DeviceInfoState>({
+    deviceName: "", deviceType: "", deviceCode: "", storeName: "",
+  });
+  const [devConfig, setDevConfig] = useState<DeviceConfigState>({
+    deviceConfig: null, syncedAt: "", syncing: false, syncError: "", syncOk: false,
+  });
+  const [auth, setAuth] = useState<AuthState>({ status: "idle", verifyResult: null, lastChecked: null });
+  const [appVersion, setAppVersion] = useState("\u2013");
+  const [loading, setLoading] = useState(true);
+  const [activeSection, setActiveSection] = useState("connection");
+  const autoSyncDone = useRef(false);
 
   const load = useCallback(async () => {
-    const config = await getConfig()
-    setServerUrl(config.serverUrl)
-    setIsRegistered(Boolean(config.deviceToken))
-    setTenantId(config.tenantId ?? "")
-    setDeviceId(config.deviceId ?? "")
-    setDeviceToken(config.deviceToken ?? "")
-    setScopes(config.scopes ?? [])
-    setRegisteredAt(config.registeredAt ?? "")
-    setDeviceConfig(config.deviceConfig ?? null)
-    setSyncedAt(config.deviceConfigSyncedAt ?? "")
-    setDeviceName(config.deviceName ?? "")
-    setDeviceType(config.deviceType ?? "")
-    setDeviceCode(config.deviceCode ?? "")
-    setStoreName(config.storeName ?? "")
-    setAppVersion(await getAppVersion())
-    setLoading(false)
-    return { registered: Boolean(config.deviceToken), hasConfig: Boolean(config.deviceConfig) }
-  }, [])
+    const config = await getConfig();
+    setConnection(prev => ({ ...prev, serverUrl: config.serverUrl }));
+    setReg({
+      isRegistered: Boolean(config.deviceToken),
+      tenantId: config.tenantId ?? "",
+      deviceId: config.deviceId ?? "",
+      deviceToken: config.deviceToken ?? "",
+      scopes: config.scopes ?? [],
+      registeredAt: config.registeredAt ?? "",
+    });
+    setDevConfig(prev => ({
+      ...prev,
+      deviceConfig: config.deviceConfig ?? null,
+      syncedAt: config.deviceConfigSyncedAt ?? "",
+    }));
+    setDevice({
+      deviceName: config.deviceName ?? "",
+      deviceType: config.deviceType ?? "",
+      deviceCode: config.deviceCode ?? "",
+      storeName: config.storeName ?? "",
+    });
+    setAppVersion(await getAppVersion());
+    setLoading(false);
+    return { registered: Boolean(config.deviceToken), hasConfig: Boolean(config.deviceConfig) };
+  }, []);
 
   const doSync = useCallback(async () => {
-    setSyncing(true)
-    setSyncError("")
-    setSyncOk(false)
+    setDevConfig(prev => ({ ...prev, syncing: true, syncError: "", syncOk: false }));
     try {
-      const cfg = await syncDeviceConfig()
-      setDeviceConfig(cfg)
-      setSyncedAt(new Date().toISOString())
-      const latest = await getConfig()
-      setDeviceName(latest.deviceName ?? "")
-      setDeviceType(latest.deviceType ?? "")
-      setDeviceCode(latest.deviceCode ?? "")
-      setStoreName(latest.storeName ?? "")
-      setSyncOk(true)
-      setTimeout(() => setSyncOk(false), 3000)
+      const cfg = await syncDeviceConfig();
+      const latest = await getConfig();
+      setDevConfig(prev => ({
+        ...prev,
+        deviceConfig: cfg,
+        syncedAt: new Date().toISOString(),
+        syncing: false,
+        syncError: "",
+        syncOk: true,
+      }));
+      setDevice({
+        deviceName: latest.deviceName ?? "",
+        deviceType: latest.deviceType ?? "",
+        deviceCode: latest.deviceCode ?? "",
+        storeName: latest.storeName ?? "",
+      });
+      setTimeout(() => setDevConfig(prev => ({ ...prev, syncOk: false })), 3000);
     } catch (err: unknown) {
-      setSyncError(err instanceof Error ? err.message : "Sync failed")
-    } finally {
-      setSyncing(false)
+      setDevConfig(prev => ({
+        ...prev,
+        syncing: false,
+        syncError: err instanceof Error ? err.message : "Sync failed",
+      }));
     }
-  }, [])
+  }, []);
 
   const verifyAuth = useCallback(async () => {
-    const config = await getConfig()
-    if (!config.deviceToken) return
-    setAuthStatus("checking")
-    setVerifyResult(null)
+    const config = await getConfig();
+    if (!config.deviceToken) return;
+    setAuth(prev => ({ ...prev, status: "checking", verifyResult: null }));
     try {
-      const res = await fetch(
-        `${config.serverUrl.replace(/\/$/, "")}/api/device/v1/register-feature`,
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${config.deviceToken}`,
-            "x-tenant-id": config.tenantId,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ deviceCode: config.deviceCode }),
-        }
-      )
-      const data = await res.json()
-      setLastChecked(new Date())
+      const res = (await runtimeCall('POST', '/api/device/register-feature')) as {
+        ok: boolean;
+        status: number;
+        data?: any;
+        error?: string;
+      };
       if (res.ok) {
-        setAuthStatus("ok")
-        setVerifyResult({ device: data.data?.device ?? data.device })
+        setAuth({ status: "ok", verifyResult: { device: res.data?.data?.device ?? res.data?.device }, lastChecked: new Date() });
       } else {
-        setAuthStatus("error")
-        setVerifyResult({ error: data.error || `HTTP ${res.status}` })
+        setAuth({ status: "error", verifyResult: { error: res.error || res.data?.error || `HTTP ${res.status}` }, lastChecked: new Date() });
       }
     } catch (err: unknown) {
-      setAuthStatus("error")
-      setVerifyResult({ error: err instanceof Error ? err.message : "Network error" })
-      setLastChecked(new Date())
+      setAuth({
+        status: "error",
+        verifyResult: { error: err instanceof Error ? err.message : "Network error" },
+        lastChecked: new Date(),
+      });
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
     load().then(({ registered, hasConfig }) => {
       if (registered && !hasConfig && !autoSyncDone.current) {
-        autoSyncDone.current = true
-        doSync()
+        autoSyncDone.current = true;
+        doSync();
       }
-    })
-  }, [load, doSync])
+    });
+  }, [load, doSync]);
 
   async function handleSave(e: React.FormEvent) {
-    e.preventDefault()
-    await setConfigField("serverUrl", serverUrl)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2500)
+    e.preventDefault();
+    await setConfigField("serverUrl", connection.serverUrl);
+    setConnection(prev => ({ ...prev, saved: true }));
+    setTimeout(() => setConnection(prev => ({ ...prev, saved: false })), 2500);
   }
 
   async function handleUnregister() {
-    if (!confirm("Remove device credentials? You will need to re-register.")) return
-    await clearCredentials()
-    router.replace("/register")
+    if (!confirm("Remove device credentials? You will need to re-register.")) return;
+    await clearCredentials();
+    router.replace("/register");
   }
 
-  const configSections: { title: string; data: Record<string, any> }[] = []
-  if (deviceConfig) {
-    const { features, settings, permissions, serial, platform, custom, ...rest } = deviceConfig as any
+  const configSections = useMemo(() => {
+    const sections: { title: string; data: Record<string, any> }[] = [];
+    const dc = devConfig.deviceConfig;
+    if (!dc) return sections;
+    const { features, settings, permissions, serial, platform, custom, ...rest } = dc as any;
     if (platform    && typeof platform    === "object" && !Array.isArray(platform))
-      configSections.push({ title: "Platform",    data: platform })
+      sections.push({ title: "Platform",    data: platform });
     if (features    && typeof features    === "object" && !Array.isArray(features))
-      configSections.push({ title: "Features",    data: features })
+      sections.push({ title: "Features",    data: features });
     if (settings    && typeof settings    === "object" && !Array.isArray(settings))
-      configSections.push({ title: "Settings",    data: settings })
+      sections.push({ title: "Settings",    data: settings });
     if (permissions && typeof permissions === "object" && !Array.isArray(permissions))
-      configSections.push({ title: "Permissions", data: permissions })
+      sections.push({ title: "Permissions", data: permissions });
     if (serial      && typeof serial      === "object" && !Array.isArray(serial))
-      configSections.push({ title: "Serial Port", data: serial })
+      sections.push({ title: "Serial Port", data: serial });
     if (custom      && typeof custom      === "object" && !Array.isArray(custom) && Object.keys(custom).length > 0)
-      configSections.push({ title: "Custom",      data: custom })
-    const restEntries = Object.entries(rest).filter(([, v]) => typeof v !== "object" || v === null)
+      sections.push({ title: "Custom",      data: custom });
+    const restEntries = Object.entries(rest).filter(([, v]) => typeof v !== "object" || v === null);
     if (restEntries.length > 0)
-      configSections.push({ title: "Other", data: Object.fromEntries(restEntries) })
-  }
+      sections.push({ title: "Other", data: Object.fromEntries(restEntries) });
+    return sections;
+  }, [devConfig.deviceConfig]);
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
       </div>
-    )
+    );
   }
 
   return (
     <div className="min-h-screen bg-slate-50">
-
-      {/* Top bar */}
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
@@ -245,10 +274,7 @@ export default function SettingsPage() {
         </nav>
       </header>
 
-      {/* Layout */}
       <div className="w-full px-4 py-8 flex gap-6 items-start">
-
-        {/* Sidebar — desktop */}
         <aside className="hidden md:block w-52 shrink-0 sticky top-20">
           <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Settings</p>
           <nav className="space-y-0.5">
@@ -270,7 +296,6 @@ export default function SettingsPage() {
           </nav>
         </aside>
 
-        {/* Mobile pill nav */}
         <div className="md:hidden fixed bottom-0 left-0 right-0 z-20 bg-white border-t border-slate-200 px-3 py-2 flex gap-1.5 overflow-x-auto">
           {NAV.map(item => (
             <button
@@ -289,10 +314,7 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        {/* Content */}
         <main className="flex-1 min-w-0 pb-20 md:pb-0">
-
-          {/* Server Connection */}
           {activeSection === "connection" && (
             <div className="card p-6">
               <SectionLabel>
@@ -308,8 +330,8 @@ export default function SettingsPage() {
                     id="serverUrl"
                     type="url"
                     className="input"
-                    value={serverUrl}
-                    onChange={e => setServerUrl(e.target.value)}
+                    value={connection.serverUrl}
+                    onChange={e => setConnection(prev => ({ ...prev, serverUrl: e.target.value }))}
                     placeholder="https://your-server.com"
                     required
                   />
@@ -319,13 +341,12 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <button type="submit" className="btn-primary text-sm">Save</button>
-                  {saved && <span className="text-sm text-green-600 font-medium">✓ Saved</span>}
+                  {connection.saved && <span className="text-sm text-green-600 font-medium">\u2713 Saved</span>}
                 </div>
               </form>
             </div>
           )}
 
-          {/* Registration */}
           {activeSection === "registration" && (
             <div className="card p-6 space-y-4">
               <SectionLabel>
@@ -334,18 +355,18 @@ export default function SettingsPage() {
                 </svg>
                 Registration
               </SectionLabel>
-              {isRegistered ? (
+              {reg.isRegistered ? (
                 <>
                   <div className="flex items-center gap-2">
-                    <span className="badge-active">● Registered</span>
+                    <span className="badge-active">\u25cf Registered</span>
                     <span className="text-sm text-slate-500">This device has active credentials.</span>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-                    {deviceName   && <Row label="Device Name"><span className="font-semibold">{deviceName}</span></Row>}
-                    {deviceType   && <Row label="Device Type"><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">{deviceType}</span></Row>}
-                    {deviceCode   && <Row label="Device Code"><span className="font-mono">{deviceCode}</span></Row>}
-                    {storeName    && <Row label="Store">{storeName}</Row>}
-                    {registeredAt && <Row label="Registered">{new Date(registeredAt).toLocaleString()}</Row>}
+                    {device.deviceName && <Row label="Device Name"><span className="font-semibold">{device.deviceName}</span></Row>}
+                    {device.deviceType && <Row label="Device Type"><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">{device.deviceType}</span></Row>}
+                    {device.deviceCode && <Row label="Device Code"><span className="font-mono">{device.deviceCode}</span></Row>}
+                    {device.storeName && <Row label="Store">{device.storeName}</Row>}
+                    {reg.registeredAt && <Row label="Registered">{new Date(reg.registeredAt).toLocaleString()}</Row>}
                   </div>
                   <button className="btn-secondary text-sm" onClick={() => router.push("/register")}>
                     Re-register
@@ -362,7 +383,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Authentication */}
           {activeSection === "authentication" && (
             <div className="card p-6 space-y-4">
               <div className="flex items-start justify-between gap-4">
@@ -375,54 +395,53 @@ export default function SettingsPage() {
                 <button
                   className="btn-secondary text-xs px-3 py-1.5 shrink-0"
                   onClick={verifyAuth}
-                  disabled={!isRegistered || authStatus === "checking"}
+                  disabled={!reg.isRegistered || auth.status === "checking"}
                 >
-                  {authStatus === "checking" ? "Checking…" : "Verify Now"}
+                  {auth.status === "checking" ? "Checking\u2026" : "Verify Now"}
                 </button>
               </div>
 
-              {!isRegistered && (
+              {!reg.isRegistered && (
                 <p className="text-sm text-slate-400 italic">Register this device first.</p>
               )}
-              {lastChecked && (
-                <p className="text-xs text-slate-400">Last checked: {lastChecked.toLocaleTimeString()}</p>
+              {auth.lastChecked && (
+                <p className="text-xs text-slate-400">Last checked: {auth.lastChecked.toLocaleTimeString()}</p>
               )}
-              {authStatus === "idle" && isRegistered && (
+              {auth.status === "idle" && reg.isRegistered && (
                 <p className="text-sm text-slate-400">
                   Click <strong>Verify Now</strong> to test the device token against the server.
                 </p>
               )}
-              {authStatus === "checking" && (
+              {auth.status === "checking" && (
                 <div className="flex items-center gap-2 text-sm text-slate-500">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
-                  Verifying with server…
+                  Verifying with server\u2026
                 </div>
               )}
-              {authStatus === "ok" && verifyResult?.device && (
+              {auth.status === "ok" && auth.verifyResult?.device && (
                 <div className="rounded-lg bg-green-50 border border-green-200 p-4 space-y-3">
-                  <p className="font-medium text-green-800 text-sm">✓ Authentication successful</p>
+                  <p className="font-medium text-green-800 text-sm">\u2713 Authentication successful</p>
                   <div className="rounded-lg border border-green-200 bg-white overflow-hidden">
-                    <Row label="Device">{verifyResult.device.deviceName}</Row>
-                    <Row label="Active">{verifyResult.device.isActive ? "Yes" : "No"}</Row>
-                    {verifyResult.device.store && <Row label="Store">{verifyResult.device.store.name}</Row>}
-                    {verifyResult.device.permissions && (
+                    <Row label="Device">{auth.verifyResult.device.deviceName}</Row>
+                    <Row label="Active">{auth.verifyResult.device.isActive ? "Yes" : "No"}</Row>
+                    {auth.verifyResult.device.store && <Row label="Store">{auth.verifyResult.device.store.name}</Row>}
+                    {auth.verifyResult.device.permissions && (
                       <Row label="Permissions">
-                        {Object.entries(verifyResult.device.permissions).filter(([, v]) => v).map(([k]) => k).join(", ") || "None"}
+                        {Object.entries(auth.verifyResult.device.permissions).filter(([, v]) => v).map(([k]) => k).join(", ") || "None"}
                       </Row>
                     )}
                   </div>
                 </div>
               )}
-              {authStatus === "error" && (
+              {auth.status === "error" && (
                 <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm">
-                  <p className="font-medium text-red-800">✗ Authentication failed</p>
-                  <p className="mt-1 text-xs text-red-600">{verifyResult?.error}</p>
+                  <p className="font-medium text-red-800">\u2717 Authentication failed</p>
+                  <p className="mt-1 text-xs text-red-600">{auth.verifyResult?.error}</p>
                 </div>
               )}
             </div>
           )}
 
-          {/* Credentials */}
           {activeSection === "credentials" && (
             <div className="card p-6 space-y-4">
               <SectionLabel>
@@ -432,29 +451,37 @@ export default function SettingsPage() {
                 Credentials
               </SectionLabel>
               <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-                <Row label="Server URL"><span className="font-mono text-xs break-all">{serverUrl || "—"}</span></Row>
-                <Row label="Tenant ID"><span className="font-mono text-xs">{tenantId || "—"}</span></Row>
-                <Row label="Device ID"><span className="font-mono text-xs">{deviceId || "—"}</span></Row>
+                <Row label="Server URL"><span className="font-mono text-xs break-all">{connection.serverUrl || "\u2014"}</span></Row>
+                <Row label="Tenant ID"><span className="font-mono text-xs">{reg.tenantId || "\u2014"}</span></Row>
+                <Row label="Device ID"><span className="font-mono text-xs">{reg.deviceId || "\u2014"}</span></Row>
                 <Row label="Token">
                   <span className="font-mono text-xs">
-                    {deviceToken ? `${deviceToken.substring(0, 16)}…` : "—"}
+                    {reg.deviceToken ? `${reg.deviceToken.substring(0, 16)}\u2026` : "\u2014"}
                   </span>
                 </Row>
               </div>
-              {scopes.length > 0 && (
+              {reg.scopes.length > 0 && (
                 <div>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Scopes</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {scopes.map(s => (
+                    {reg.scopes.map(s => (
                       <span key={s} className="rounded-full bg-slate-100 px-2.5 py-0.5 font-mono text-xs text-slate-600">{s}</span>
                     ))}
                   </div>
+                  {reg.isRegistered && !reg.scopes.includes("mcp:execute") && (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      <p className="font-medium">Missing "mcp:execute" scope</p>
+                      <p className="mt-1 text-xs text-amber-700">
+                        ERP-hosted MCP tools (e.g. inventory queries) will fail. Ask your administrator to grant the "mcp:execute"
+                        scope to this device, then re-register it at /register.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          {/* Device Config */}
           {activeSection === "device-config" && (
             <div className="card p-6 space-y-4">
               <div className="flex items-start justify-between gap-4">
@@ -466,33 +493,33 @@ export default function SettingsPage() {
                 </SectionLabel>
                 <button
                   onClick={doSync}
-                  disabled={!isRegistered || syncing}
+                  disabled={!reg.isRegistered || devConfig.syncing}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                 >
-                  {syncing ? (
-                    <><span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />Syncing…</>
+                  {devConfig.syncing ? (
+                    <><span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />Syncing\u2026</>
                   ) : (
                     <><svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>Sync</>
                   )}
                 </button>
               </div>
               <p className="text-xs text-slate-400">
-                {syncedAt
-                  ? <>Last synced: <span className="font-medium text-slate-500">{formatSyncedAt(syncedAt)}</span></>
+                {devConfig.syncedAt
+                  ? <>Last synced: <span className="font-medium text-slate-500">{formatSyncedAt(devConfig.syncedAt)}</span></>
                   : "All settings are managed on the server. Press Sync to fetch the latest."}
               </p>
-              {syncError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">✕ {syncError}</div>}
-              {syncOk    && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">✓ Synced successfully</div>}
-              {!isRegistered && <p className="text-sm text-slate-400 italic">Register this device first.</p>}
-              {isRegistered && !deviceConfig && !syncing && (
+              {devConfig.syncError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">\u2715 {devConfig.syncError}</div>}
+              {devConfig.syncOk    && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">\u2713 Synced successfully</div>}
+              {!reg.isRegistered && <p className="text-sm text-slate-400 italic">Register this device first.</p>}
+              {reg.isRegistered && !devConfig.deviceConfig && !devConfig.syncing && (
                 <p className="text-sm text-slate-400 italic">No configuration loaded. Press <strong>Sync</strong> to fetch it.</p>
               )}
-              {isRegistered && (deviceName || deviceType || storeName) && (
+              {reg.isRegistered && (device.deviceName || device.deviceType || device.storeName) && (
                 <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-                  {deviceName && <Row label="Device Name"><span className="font-semibold">{deviceName}</span></Row>}
-                  {deviceType && <Row label="Device Type"><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">{deviceType}</span></Row>}
-                  {deviceCode && <Row label="Device Code"><span className="font-mono text-xs">{deviceCode}</span></Row>}
-                  {storeName  && <Row label="Store">{storeName}</Row>}
+                  {device.deviceName && <Row label="Device Name"><span className="font-semibold">{device.deviceName}</span></Row>}
+                  {device.deviceType && <Row label="Device Type"><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">{device.deviceType}</span></Row>}
+                  {device.deviceCode && <Row label="Device Code"><span className="font-mono text-xs">{device.deviceCode}</span></Row>}
+                  {device.storeName  && <Row label="Store">{device.storeName}</Row>}
                 </div>
               )}
               {configSections.length > 0 && (
@@ -503,7 +530,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* About */}
           {activeSection === "about" && (
             <div className="card p-6">
               <SectionLabel>
@@ -515,20 +541,11 @@ export default function SettingsPage() {
               <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
                 <Row label="Application">Weha AI Box</Row>
                 <Row label="Version"><span className="font-mono">{appVersion}</span></Row>
-                <Row label="Framework">Electron + Next.js</Row>
+                <Row label="Framework">Next.js</Row>
               </div>
-              {typeof window !== "undefined" && (window as any).electronAPI && (
-                <button
-                  className="mt-4 text-xs text-blue-600 hover:underline"
-                  onClick={() => (window as any).electronAPI?.openExternal("https://github.com/weha")}
-                >
-                  Visit documentation →
-                </button>
-              )}
             </div>
           )}
 
-          {/* Danger Zone */}
           {activeSection === "danger" && (
             <div className="card border-red-200 p-6 space-y-3">
               <SectionLabel>
@@ -543,15 +560,14 @@ export default function SettingsPage() {
               <button
                 className="btn-danger text-sm"
                 onClick={handleUnregister}
-                disabled={!isRegistered}
+                disabled={!reg.isRegistered}
               >
                 Remove Device Credentials
               </button>
             </div>
           )}
-
         </main>
       </div>
     </div>
-  )
+  );
 }

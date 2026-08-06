@@ -1,6 +1,7 @@
 import { databaseService } from '../database/database.service.js'
 import { credentialVault } from './credential-vault.js'
 import { CircuitBreaker } from './circuit-breaker.js'
+import { localToolRegistry } from './local-tool-registry.js'
 
 interface McpToolDefinition {
   name: string
@@ -117,6 +118,16 @@ class McpRuntimeService {
     })
   }
 
+  async executeLocalTool(
+    code: string,
+    args: Record<string, unknown>,
+    context?: { variables: Record<string, unknown> },
+  ): Promise<unknown> {
+    const handler = localToolRegistry.getHandler(code)
+    if (!handler) throw new Error(`No local handler registered for tool: ${code}`)
+    return await handler.handler(args, context || { variables: {} })
+  }
+
   async executeWorkflow(serverId: string, workflowName: string, args: Record<string, unknown>): Promise<unknown> {
     const server = this.servers.get(serverId)
     if (!server) throw new Error(`MCP server not found: ${serverId}`)
@@ -165,6 +176,7 @@ class McpRuntimeService {
   async registerServer(params: {
     name: string
     url: string
+    apiKey?: string
     description?: string
     config?: Record<string, unknown>
   }): Promise<string> {
@@ -173,12 +185,16 @@ class McpRuntimeService {
       data: {
         name: params.name,
         url: params.url,
+        apiKey: params.apiKey,
         description: params.description,
         config: params.config || {},
       },
     })
 
     const headers: Record<string, string> = {}
+    if (params.apiKey) {
+      headers['x-api-key'] = params.apiKey
+    }
     this.servers.set(record.id, {
       id: record.id,
       name: record.name,

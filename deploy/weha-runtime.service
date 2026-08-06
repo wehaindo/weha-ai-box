@@ -1,0 +1,17 @@
+[Unit]
+Description=WEHA AI Box Runtime (Fastify API)
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=weha
+WorkingDirectory=/opt/weha-ai-box
+EnvironmentFile=/opt/weha-ai-box/.env
+ExecStart=/usr/bin/node /opt/weha-ai-box/node_modules/.bin/tsx /opt/weha-ai-box/src/main.ts
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

@@ -11,9 +11,13 @@ import { executionRoutes } from './api/routes/executions.js'
 import { scheduleRoutes } from './api/routes/schedules.js'
 import { erpRoutes } from './api/routes/erp.js'
 import { mcpRoutes } from './api/routes/mcp.js'
+import { mcpPublicRoutes } from './api/routes/mcp-public.js'
 import { notificationRoutes } from './api/routes/notifications.js'
 import { syncRoutes } from './api/routes/sync.js'
 import { agentRoutes } from './api/routes/agents.js'
+import { settingsRoutes } from './api/routes/settings.js'
+import { deviceConfigRoutes } from './api/routes/device-config.js'
+import { chatRoutes } from './api/routes/chat.js'
 
 export async function buildApp() {
   const app = Fastify({
@@ -42,6 +46,18 @@ export async function buildApp() {
     }
   })
 
+  // Tolerate empty JSON bodies (some clients send Content-Type: application/json
+  // with an empty body, which Fastify would otherwise reject as invalid).
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    try {
+      const text = String(body || '').trim()
+      const parsed = text === '' ? {} : JSON.parse(text)
+      done(null, parsed)
+    } catch (err) {
+      done(err as Error, undefined)
+    }
+  })
+
   registerErrorHandler(app)
 
   await app.register(swagger, {
@@ -64,9 +80,13 @@ export async function buildApp() {
   await app.register(scheduleRoutes)
   await app.register(erpRoutes)
   await app.register(mcpRoutes)
+  await app.register(mcpPublicRoutes)
   await app.register(notificationRoutes)
   await app.register(syncRoutes)
   await app.register(agentRoutes)
+  await app.register(settingsRoutes)
+  await app.register(deviceConfigRoutes)
+  await app.register(chatRoutes)
 
   return app
 }

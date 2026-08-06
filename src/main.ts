@@ -8,6 +8,8 @@ import { notificationGateway } from './modules/notification-gateway/notification
 import { whotifProvider, telegramProvider, emailProvider, firebaseProvider, smsProvider } from './modules/notification-gateway/providers/index.js'
 import { syncEngineService, licenseService } from './modules/sync-engine/index.js'
 import { erpAuthService } from './modules/erp-connector/erp-auth.service.js'
+import { llmProvider } from './modules/llm/llm-provider.service.js'
+import { deviceConfigService } from './modules/device-config/device-config.service.js'
 
 async function main() {
   console.log('Starting WEHA AI Box Runtime...')
@@ -16,6 +18,8 @@ async function main() {
 
   // Load persisted ERP credentials
   await erpAuthService.loadFromDatabase()
+  // Load persisted device config
+  await deviceConfigService.loadFromDatabase()
 
   registerCoreNodes()
   schedulerService.start()
@@ -27,6 +31,7 @@ async function main() {
   notificationGateway.registerProvider(smsProvider)
 
   mcpRuntimeService.loadServers().catch((err) => console.warn('MCP server loading skipped:', err.message))
+  llmProvider.loadConfig().catch((err) => console.warn('LLM config load skipped:', err.message))
   syncEngineService.configure('1.0.0')
   syncEngineService.start()
   licenseService.configure()

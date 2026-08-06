@@ -17,6 +17,12 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   JWT_SECRET: z.string().min(16),
   ENCRYPTION_KEY: z.string().min(32),
+  LLM_API_KEY: z.string().optional(),
+  LLM_BASE_URL: z.string().optional(),
+  LLM_MODEL: z.string().optional(),
+  LLM_FALLBACK_URL: z.string().optional(),
+  LLM_FALLBACK_KEY: z.string().optional(),
+  LLM_FALLBACK_MODEL: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

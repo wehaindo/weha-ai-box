@@ -1,295 +1,371 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { runtimeCall } from '@/lib/device-config'
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { runtimeCall } from '@/lib/device-config';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
-const STATUS_STYLES: Record<string, string> = {
-  PENDING: 'bg-yellow-100 text-yellow-800',
-  RUNNING: 'bg-blue-100 text-blue-800',
-  PAUSED: 'bg-purple-100 text-purple-800',
-  WAITING_APPROVAL: 'bg-purple-100 text-purple-800',
-  COMPLETED: 'bg-green-100 text-green-800',
-  FAILED: 'bg-red-100 text-red-800',
-  CANCELLED: 'bg-slate-100 text-slate-800',
+const TOKEN_COST = { input: 0.15 / 1_000_000, output: 0.60 / 1_000_000 }
+
+interface ExecutionLogEntry {
+  nodeId: string
+  nodeType: string
+  label: string
+  duration: number
+  status: 'success' | 'failed' | 'skipped' | 'pending_approval' | 'waiting_input'
+  input?: Record<string, unknown>
+  output?: Record<string, unknown>
+  error?: string
+  tokenUsage?: number
 }
 
-const NODE_STATUS_ICON: Record<string, [string, string]> = {
-  COMPLETED: ['✅', 'text-green-600'],
-  RUNNING: ['🔄', 'text-blue-600'],
-  PAUSED: ['⏸', 'text-purple-600'],
-  FAILED: ['❌', 'text-red-600'],
-  PENDING: ['⏳', 'text-slate-300'],
-  SKIPPED: ['⛔', 'text-slate-400'],
+function NodeIcon({ type }: { type: string }) {
+  const icons: Record<string, string> = {
+    start: '▶', end: '■', condition: '◇', switch: '⬡', loop: '↻',
+    parallel: '∥', delay: '⏱', wait: '⏸', prompt: '💬', reasoning: '🧠',
+    summary: '📋', classification: '🏷', 'mcp-tool': '🔧', 'mcp-workflow': '⚙',
+    'erp-query': '🔍', 'erp-action': '⚡', 'workflow-action': '🔄',
+    webhook: '🔗', telegram: '✉', email: '📧', notification: '🔔', push: '📲',
+    whotif: '💭', approval: '✅', human_input: '👤', knowledge_search: '📚',
+    subflow: '🔀', task: '📝', database: '🗄', script: '📜',
+    variable: '📌', transform: '🔄', math: '🔢', json: '📦', date: '📅',
+  }
+  return <span className="text-base">{icons[type] || '⚪'}</span>
 }
 
-function topologicalSort(nodes: any[], edges: any[]): string[] {
-  const adj = new Map<string, string[]>()
-  const inDeg = new Map<string, number>()
-  for (const n of nodes) {
-    adj.set(n.id, [])
-    inDeg.set(n.id, 0)
+function statusBadge(status: string): { label: string; variant: string; dot: string } {
+  const map: Record<string, { label: string; variant: string; dot: string }> = {
+    success: { label: 'Success', variant: 'default', dot: 'bg-green-500' },
+    failed: { label: 'Failed', variant: 'destructive', dot: 'bg-red-500' },
+    skipped: { label: 'Skipped', variant: 'secondary', dot: 'bg-gray-400' },
+    pending_approval: { label: 'Pending Approval', variant: 'secondary', dot: 'bg-yellow-500' },
+    waiting_input: { label: 'Waiting Input', variant: 'secondary', dot: 'bg-purple-500' },
+    running: { label: 'Running', variant: 'secondary', dot: 'bg-blue-500' },
+    pending: { label: 'Pending', variant: 'outline', dot: 'bg-gray-300' },
   }
-  for (const e of edges) {
-    adj.get(e.source)?.push(e.target)
-    inDeg.set(e.target, (inDeg.get(e.target) || 0) + 1)
+  return map[status] || { label: status, variant: 'outline', dot: 'bg-gray-300' }
+}
+
+function renderOutput(entry: ExecutionLogEntry) {
+  const out = (entry.output || {}) as any
+  const nodeType = entry.nodeType
+  const aiTypes = ['prompt', 'reasoning', 'summary', 'classification']
+
+  if (aiTypes.includes(nodeType)) {
+    return (
+      <div className="mt-1 space-y-2">
+        {out.prompt && (
+          <div className="flex flex-col items-start">
+            <span className="text-[10px] font-medium text-muted-foreground mb-1">Prompt</span>
+            <div className="bg-muted rounded-xl rounded-tl-sm px-3 py-2 text-sm text-foreground max-w-full whitespace-pre-wrap break-words">
+              {String(out.prompt)}
+            </div>
+          </div>
+        )}
+        {out.response && (
+          <div className="flex flex-col items-end">
+            <span className="text-[10px] font-medium text-muted-foreground mb-1">Response</span>
+            <div className="bg-primary/10 rounded-xl rounded-tr-sm px-3 py-2 text-sm text-foreground max-w-full whitespace-pre-wrap break-words">
+              {String(out.response)}
+            </div>
+          </div>
+        )}
+        {out.reasoning && (
+          <div className="bg-muted rounded-xl px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words">
+            {String(out.reasoning)}
+          </div>
+        )}
+        {out.summary && (
+          <div className="bg-muted rounded-xl px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words">
+            {String(out.summary)}
+          </div>
+        )}
+        {out.classification && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Category:</span>
+            <Badge variant="secondary" className="text-xs">{String(out.classification)}</Badge>
+          </div>
+        )}
+        {/* Fallback: show remaining keys not already displayed */}
+        {Object.keys(out).filter(k => !['prompt','response','reasoning','summary','classification','categories'].includes(k)).length > 0 && (
+          <pre className="text-xs bg-muted p-3 rounded-lg overflow-auto max-h-48 text-foreground">
+            {JSON.stringify(Object.fromEntries(
+              Object.entries(out).filter(([k]) => !['prompt','response','reasoning','summary','classification','categories'].includes(k))
+            ), null, 2)}
+          </pre>
+        )}
+      </div>
+    )
   }
-  const q: string[] = []
-  for (const [id, deg] of inDeg) {
-    if (deg === 0) q.push(id)
-  }
-  const order: string[] = []
-  while (q.length > 0) {
-    const id = q.shift()!
-    order.push(id)
-    for (const next of adj.get(id) || []) {
-      const d = (inDeg.get(next) || 1) - 1
-      inDeg.set(next, d)
-      if (d === 0) q.push(next)
-    }
-  }
-  return order
+
+  // Default: render as raw JSON
+  return (
+    <pre className="mt-1 text-xs bg-muted p-3 rounded-lg overflow-auto max-h-64 text-foreground">
+      {JSON.stringify(entry.output, null, 2)}
+    </pre>
+  )
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
+}
+
+function estimateCost(tokenUsage: number, isOutput = true): number {
+  return tokenUsage * (isOutput ? TOKEN_COST.output : TOKEN_COST.input)
 }
 
 export default function ExecutionDetailPage() {
-  const { executionId } = useParams<{ executionId: string }>()
-  const router = useRouter()
-  const [exec, setExec] = useState<any>(null)
-  const [agentDef, setAgentDef] = useState<any>(null)
-  const [expandedNode, setExpandedNode] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { executionId } = useParams<{ executionId: string }>();
+  const router = useRouter();
+  const [exec, setExec] = useState<any>(null);
+  const [expandedNode, setExpandedNode] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const fetchData = async () => {
-    const execRes = await runtimeCall('GET', `/api/executions/${executionId}`) as any
-    const data = execRes?.data
-    setExec(data)
-    if (data?.agentId) {
-      const agentRes = await runtimeCall('GET', `/api/agents/${data.agentId}`) as any
-      setAgentDef(agentRes?.data?.definition)
-    }
-    setLoading(false)
-    return data
-  }
+  const fetchData = useCallback(async () => {
+    const execRes = await runtimeCall('GET', `/api/executions/${executionId}`) as any;
+    setExec(execRes?.data);
+    setLoading(false);
+    return execRes?.data;
+  }, [executionId]);
+
+  useEffect(() => { fetchData() }, [fetchData]);
 
   useEffect(() => {
-    fetchData()
-  }, [executionId])
+    if (!exec) return;
+    if (!['RUNNING', 'PAUSED', 'WAITING_APPROVAL'].includes(exec.status)) return;
+    const timer = setInterval(fetchData, 3000);
+    return () => clearInterval(timer);
+  }, [exec?.status, fetchData]);
 
-  useEffect(() => {
-    if (!exec) return
-    if (!['RUNNING', 'PAUSED', 'WAITING_APPROVAL'].includes(exec.status)) return
-    const timer = setInterval(fetchData, 3000)
-    return () => clearInterval(timer)
-  }, [exec?.status])
+  const execLog: ExecutionLogEntry[] = useMemo(() => {
+    return exec?.output?.executionLog || []
+  }, [exec?.output]);
 
-  const activeExec = exec
-  const definition = agentDef
-  const nodes: any[] = definition?.nodes || []
-  const edges: any[] = definition?.edges || []
-  const execOrder = nodes.length > 0 ? topologicalSort(nodes, edges) : []
-  const checkpointMap = new Map<string, any>()
-  for (const cp of activeExec?.checkpoints || []) {
-    checkpointMap.set(cp.nodeId, cp)
-  }
+  const totalDuration = useMemo(() =>
+    execLog.reduce((sum, e) => sum + e.duration, 0), [execLog])
 
-  const nodeStatuses: Record<string, string> = {}
-  let foundFirstIncomplete = false
-  for (const nodeId of execOrder) {
-    if (checkpointMap.has(nodeId)) {
-      const cp = checkpointMap.get(nodeId)
-      const lastResult = cp?.state?.lastResult
-      nodeStatuses[nodeId] = lastResult?.success === false ? 'FAILED' : 'COMPLETED'
-    } else if (!foundFirstIncomplete) {
-      foundFirstIncomplete = true
-      const s = activeExec?.status
-      nodeStatuses[nodeId] =
-        s === 'RUNNING' ? 'RUNNING' :
-        s === 'PAUSED' || s === 'WAITING_APPROVAL' ? 'PAUSED' :
-        s === 'FAILED' ? 'FAILED' :
-        s === 'CANCELLED' ? 'SKIPPED' : 'PENDING'
-    } else {
-      nodeStatuses[nodeId] = 'PENDING'
-    }
-  }
+  const totalTokens = useMemo(() =>
+    execLog.reduce((sum, e) => sum + (e.tokenUsage || 0), 0), [execLog])
 
-  function getNodeLabel(nodeId: string) {
-    const n = nodes.find((n) => n.id === nodeId)
-    return n?.label || n?.type || nodeId
-  }
-
-  function getNodeType(nodeId: string) {
-    const n = nodes.find((n) => n.id === nodeId)
-    return n?.type || ''
-  }
-
-  function getNodeDuration(nodeId: string) {
-    const cps = activeExec?.checkpoints || []
-    const idx = cps.findIndex((c: any) => c.nodeId === nodeId)
-    if (idx === -1) return null
-    const start = idx === 0 ? new Date(activeExec.createdAt).getTime() : new Date(cps[idx - 1].createdAt).getTime()
-    const end = new Date(cps[idx].createdAt).getTime()
-    const ms = end - start
-    return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
-  }
+  const totalCost = useMemo(() => {
+    const outputTokens = execLog.reduce((s, e) => s + (e.tokenUsage || 0), 0)
+    return estimateCost(outputTokens, true)
+  }, [execLog])
 
   if (loading) {
-    return <div className="p-6 text-center text-slate-400">Loading execution…</div>
+    return <div className="p-6 text-center text-muted-foreground">Loading execution…</div>;
   }
 
-  if (!activeExec) {
-    return <div className="p-6 text-center text-slate-400">Execution not found.</div>
+  if (!exec) {
+    return <div className="p-6 text-center text-muted-foreground">Execution not found.</div>;
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <button onClick={() => router.push('/dashboard/executions')} className="text-sm text-blue-600 hover:text-blue-800 mb-4">&larr; Back to Executions</button>
+    <div className="w-full max-w-full mx-auto space-y-6">
+      <button onClick={() => router.push('/dashboard/executions')} className="text-sm text-primary hover:text-primary/80">&larr; Back to Executions</button>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-slate-900 mb-1">{activeExec.executionId}</h1>
-            <p className="text-sm text-slate-500">
-              Agent: <span className="font-medium">{activeExec.agent?.name || activeExec.agentId}</span>
-              &nbsp;&middot;&nbsp;Trigger: {activeExec.trigger}
-            </p>
+      {/* Header */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-foreground">{exec.executionId}</h1>
+                <Badge variant={exec.status === 'COMPLETED' ? 'default' : exec.status === 'FAILED' ? 'destructive' : 'secondary'}>
+                  {exec.status}
+                </Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Agent: <span className="font-medium">{exec.agent?.name || exec.agentId}</span>
+                &nbsp;&middot;&nbsp;Trigger: {exec.trigger}
+              </p>
+            </div>
           </div>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_STYLES[activeExec.status] || 'bg-slate-100 text-slate-500'}`}>
-            {activeExec.status}
-          </span>
+          <div className="mt-3 text-xs text-muted-foreground flex flex-wrap gap-x-6 gap-y-1">
+            <span>Created: {new Date(exec.createdAt).toLocaleString()}</span>
+            {exec.completedAt && <span>Completed: {new Date(exec.completedAt).toLocaleString()}</span>}
+            <span>Duration: {formatDuration(totalDuration)}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Stats summary */}
+      {execLog.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-foreground">{execLog.length}</div>
+              <div className="text-xs text-muted-foreground mt-1">Steps</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-foreground">{formatDuration(totalDuration)}</div>
+              <div className="text-xs text-muted-foreground mt-1">Total Time</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-foreground">{totalTokens.toLocaleString()}</div>
+              <div className="text-xs text-muted-foreground mt-1">Tokens Used</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-foreground">${totalCost.toFixed(6)}</div>
+              <div className="text-xs text-muted-foreground mt-1">Est. Cost</div>
+            </CardContent>
+          </Card>
         </div>
-        <div className="mt-3 text-xs text-slate-400 flex gap-4">
-          <span>Created: {new Date(activeExec.createdAt).toLocaleString()}</span>
-          {activeExec.completedAt && <span>Completed: {new Date(activeExec.completedAt).toLocaleString()}</span>}
-        </div>
-      </div>
+      )}
 
-      {nodes.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Flow Progress ({execOrder.length} steps)</h2>
-          <div className="relative">
-            {execOrder.map((nodeId, i) => {
-              const status = nodeStatuses[nodeId] || 'PENDING'
-              const [icon, iconColor] = NODE_STATUS_ICON[status] || ['⏳', 'text-slate-300']
-              const cp = checkpointMap.get(nodeId)
-              const isExpanded = expandedNode === nodeId
-              const isLast = i === execOrder.length - 1
+      {/* Execution steps */}
+      {execLog.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Execution Steps</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {execLog.map((entry, i) => {
+                const isExpanded = expandedNode === entry.nodeId;
+                const sb = statusBadge(entry.status);
+                const isLast = i === execLog.length - 1;
 
-              return (
-                <div key={nodeId} className="relative pb-6">
-                  {!isLast && <div className="absolute left-[19px] top-8 bottom-0 w-0.5 bg-slate-200" />}
-                  <div className="flex items-start gap-3">
-                    <div className={`text-lg shrink-0 mt-0.5 ${iconColor}`}>{icon}</div>
-                    <div className="flex-1 min-w-0">
-                      <button
-                        onClick={() => setExpandedNode(isExpanded ? null : nodeId)}
-                        className="w-full text-left"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-medium text-slate-900">{getNodeLabel(nodeId)}</span>
-                            <span className="ml-2 text-xs text-slate-400">{getNodeType(nodeId)}</span>
+                return (
+                  <div key={entry.nodeId + i} className="relative">
+                    {/* Timeline connector */}
+                    {!isLast && (
+                      <div className="absolute left-[18px] top-10 bottom-0 w-0.5 bg-border" />
+                    )}
+                    <div className="flex items-start gap-3">
+                      {/* Status dot */}
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                        entry.status === 'success' ? 'bg-green-100 dark:bg-green-900/30' :
+                        entry.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30' :
+                        'bg-muted'
+                      }`}>
+                        <NodeIcon type={entry.nodeType} />
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0 pb-4">
+                        <button
+                          onClick={() => setExpandedNode(isExpanded ? null : entry.nodeId)}
+                          className="w-full text-left"
+                        >
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-foreground">{entry.label}</span>
+                              <span className="text-xs text-muted-foreground font-mono">{entry.nodeType}</span>
+                              <Badge variant={sb.variant as any} className="text-[10px] px-1.5 py-0">
+                                <span className={`w-1.5 h-1.5 rounded-full ${sb.dot} mr-1 inline-block`} />
+                                {sb.label}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              {entry.tokenUsage ? (
+                                <span className="font-mono text-yellow-600 dark:text-yellow-400">{entry.tokenUsage} tok</span>
+                              ) : null}
+                              <span className="font-mono">{formatDuration(entry.duration)}</span>
+                              {entry.output && Object.keys(entry.output).length > 0 && (
+                                <span className="text-muted-foreground/50">▼</span>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-slate-400">
-                            {getNodeDuration(nodeId) && <span>{getNodeDuration(nodeId)}</span>}
-                            {cp && <span className="text-slate-300">&#9660;</span>}
-                          </div>
-                        </div>
-                      </button>
+                        </button>
 
-                      {isExpanded && cp && (
-                        <div className="mt-2 ml-1 p-3 bg-slate-50 rounded-lg text-xs space-y-2">
-                          {cp.state?.lastResult?.output && Object.keys(cp.state.lastResult.output).length > 0 && (
-                            <div>
-                              <span className="font-medium text-slate-700">Output:</span>
-                              <pre className="mt-1 bg-slate-100 p-2 rounded overflow-x-auto text-slate-600">{JSON.stringify(cp.state.lastResult.output, null, 2)}</pre>
-                            </div>
-                          )}
-                          {cp.variables && Object.keys(cp.variables).length > 0 && (
-                            <div>
-                              <span className="font-medium text-slate-700">Variables:</span>
-                              <pre className="mt-1 bg-slate-100 p-2 rounded overflow-x-auto text-slate-600">{JSON.stringify(cp.variables, null, 2)}</pre>
-                            </div>
-                          )}
-                          {cp.state?.lastResult?.error && (
-                            <div>
-                              <span className="font-medium text-red-600">Error:</span>
-                              <pre className="mt-1 bg-red-50 p-2 rounded overflow-x-auto text-red-500">{cp.state.lastResult.error}</pre>
-                            </div>
-                          )}
-                          {(() => {
-                            const nodeLogs = (activeExec.logs || []).filter((l: any) => l.nodeId === nodeId)
-                            if (nodeLogs.length === 0) return null
-                            return (
+                        {/* Expanded details */}
+                        {isExpanded && (
+                          <div className="mt-3 space-y-3 pl-1">
+                            {entry.input && Object.keys(entry.input).length > 0 && (
                               <div>
-                                <span className="font-medium text-slate-700">Logs:</span>
-                                <div className="mt-1 space-y-0.5">
-                                  {nodeLogs.map((log: any) => (
-                                    <div key={log.id} className="flex gap-2 text-xs font-mono">
-                                      <span className="text-slate-400 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                                      <span className={`shrink-0 font-medium ${
-                                        log.level === 'ERROR' ? 'text-red-600' :
-                                        log.level === 'WARN' ? 'text-yellow-600' :
-                                        'text-blue-600'
-                                      }`}>{log.level}</span>
-                                      <span className="text-slate-700">{log.message}</span>
-                                    </div>
-                                  ))}
-                                </div>
+                                <span className="text-xs font-medium text-muted-foreground">Input</span>
+                                <pre className="mt-1 text-xs bg-muted p-3 rounded-lg overflow-auto max-h-48 text-foreground">
+                                  {JSON.stringify(entry.input, null, 2)}
+                                </pre>
                               </div>
-                            )
-                          })()}
-                        </div>
-                      )}
+                            )}
+                            {entry.output && Object.keys(entry.output).length > 0 && (
+                              <div>
+                                <span className="text-xs font-medium text-muted-foreground">Output</span>
+                                {renderOutput(entry)}
+                              </div>
+                            )}
+                            {entry.error && (
+                              <div>
+                                <span className="text-xs font-medium text-destructive">Error</span>
+                                <pre className="mt-1 text-xs bg-destructive/10 p-3 rounded-lg overflow-auto text-destructive">
+                                  {entry.error}
+                                </pre>
+                              </div>
+                            )}
+                            {entry.tokenUsage ? (
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                <span>Tokens: <span className="font-mono text-foreground">{entry.tokenUsage}</span></span>
+                                <span>Cost: <span className="font-mono text-foreground">${estimateCost(entry.tokenUsage, true).toFixed(7)}</span></span>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Output JSON (raw) */}
+      {exec.output && Object.keys(exec.output).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Raw Output</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="text-xs bg-muted p-4 rounded-lg overflow-auto max-h-96">{JSON.stringify(exec.output, null, 2)}</pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {exec.error && (
+        <Card className="border-destructive/20 bg-destructive/10">
+          <CardHeader>
+            <CardTitle className="text-destructive">Error</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="text-xs text-destructive overflow-auto max-h-48">{JSON.stringify(exec.error, null, 2)}</pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {(exec.logs || []).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Logs ({exec.logs.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="max-h-80 overflow-y-auto">
+            <div className="space-y-1">
+              {exec.logs.map((log: any) => (
+                <div key={log.id} className="flex gap-2 text-xs font-mono">
+                  <span className="text-muted-foreground shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                  <span className={`shrink-0 font-medium ${
+                    log.level === 'ERROR' ? 'text-destructive' :
+                    log.level === 'WARN' ? 'text-yellow-600' : 'text-blue-600'
+                  }`}>{log.level}</span>
+                  {log.nodeId && <span className="text-muted-foreground shrink-0">[{log.nodeId}]</span>}
+                  <span className="text-foreground">{log.message}</span>
                 </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        {activeExec.input && Object.keys(activeExec.input).length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-sm font-semibold text-slate-900 mb-2">Input</h2>
-            <pre className="text-xs bg-slate-50 p-3 rounded overflow-x-auto text-slate-600">{JSON.stringify(activeExec.input, null, 2)}</pre>
-          </div>
-        )}
-        {activeExec.output && Object.keys(activeExec.output).length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-sm font-semibold text-slate-900 mb-2">Output</h2>
-            <pre className="text-xs bg-slate-50 p-3 rounded overflow-x-auto text-slate-600">{JSON.stringify(activeExec.output, null, 2)}</pre>
-          </div>
-        )}
-      </div>
-
-      {activeExec.error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
-          <h2 className="text-sm font-semibold text-red-700 mb-2">Error</h2>
-          <pre className="text-xs text-red-600 overflow-x-auto">{JSON.stringify(activeExec.error, null, 2)}</pre>
-        </div>
-      )}
-
-      {(activeExec.logs || []).length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Logs ({activeExec.logs.length})</h2>
-          <div className="space-y-1 max-h-80 overflow-y-auto">
-            {activeExec.logs.map((log: any) => (
-              <div key={log.id} className="flex gap-2 text-xs font-mono">
-                <span className="text-slate-400 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                <span className={`shrink-0 font-medium ${
-                  log.level === 'ERROR' ? 'text-red-600' :
-                  log.level === 'WARN' ? 'text-yellow-600' :
-                  'text-blue-600'
-                }`}>{log.level}</span>
-                {log.nodeId && <span className="text-slate-400 shrink-0">[{log.nodeId}]</span>}
-                <span className="text-slate-700">{log.message}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
-  )
+  );
 }

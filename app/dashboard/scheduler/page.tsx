@@ -1,18 +1,35 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { runtimeCall } from '@/lib/device-config'
+import { useEffect, useState, memo } from 'react';
+import { runtimeCall } from '@/lib/device-config';
+
+const ScheduleRow = memo(function ScheduleRow({ schedule }: { schedule: any }) {
+  return (
+    <tr className="border-b last:border-0 hover:bg-slate-50">
+      <td className="p-3">{schedule.name}</td>
+      <td className="p-3">{schedule.type}</td>
+      <td className="p-3">
+        <span className={`px-2 py-1 rounded-full text-xs ${
+          schedule.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
+        }`}>
+          {schedule.isActive ? 'Active' : 'Inactive'}
+        </span>
+      </td>
+      <td className="p-3 text-xs">{schedule.nextRunAt ? new Date(schedule.nextRunAt).toLocaleString() : '\u2014'}</td>
+    </tr>
+  );
+});
 
 export default function SchedulerPage() {
-  const [schedules, setSchedules] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     runtimeCall('GET', '/api/schedules').then((res: any) => {
-      if (res?.data) setSchedules(res.data)
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [])
+      if (res?.data) setSchedules(res.data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
   return (
     <div>
@@ -22,7 +39,7 @@ export default function SchedulerPage() {
       </div>
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="p-6 text-center text-slate-400">Loading…</div>
+          <div className="p-6 text-center text-slate-400">Loading\u2026</div>
         ) : schedules.length === 0 ? (
           <div className="p-6 text-center text-slate-400">No schedules configured.</div>
         ) : (
@@ -37,17 +54,12 @@ export default function SchedulerPage() {
             </thead>
             <tbody>
               {schedules.map((s: any) => (
-                <tr key={s.id} className="border-b last:border-0 hover:bg-slate-50">
-                  <td className="p-3">{s.name}</td>
-                  <td className="p-3">{s.type}</td>
-                  <td className="p-3"><span className={`px-2 py-1 rounded-full text-xs ${s.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{s.isActive ? 'Active' : 'Inactive'}</span></td>
-                  <td className="p-3 text-xs">{s.nextRunAt ? new Date(s.nextRunAt).toLocaleString() : '—'}</td>
-                </tr>
+                <ScheduleRow key={s.id} schedule={s} />
               ))}
             </tbody>
           </table>
         )}
       </div>
     </div>
-  )
+  );
 }

@@ -1,91 +1,106 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { checkRuntimeHealth, runtimeCall } from '@/lib/device-config'
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import Link from 'next/link';
+import { checkRuntimeHealth, runtimeCall } from '@/lib/device-config';
 
 interface Stat {
-  label: string
-  value: string | number
-  color?: string
-  href?: string
+  label: string;
+  value: string | number;
+  color?: string;
 }
 
 export default function AppsPage() {
-  const [health, setHealth] = useState<any>(null)
-  const [agentCount, setAgentCount] = useState(0)
-  const [execStats, setExecStats] = useState({ total: 0, running: 0, completed: 0, failed: 0, pending: 0 })
-  const [scheduleCount, setScheduleCount] = useState(0)
+  const [data, setData] = useState<{
+    health: any;
+    agentCount: number;
+    execStats: { total: number; running: number; completed: number; failed: number; pending: number };
+    scheduleCount: number;
+  } | null>(null);
+
+  const load = useCallback(async () => {
+    const [healthRes, execRes, schedRes, readyRes] = await Promise.all([
+      checkRuntimeHealth().catch(() => ({ status: 'unreachable' })),
+      runtimeCall('GET', '/api/executions').catch(() => ({ data: [] })),
+      runtimeCall('GET', '/api/schedules').catch(() => ({ data: [] })),
+      runtimeCall('GET', '/api/health/ready').catch(() => ({ agents: 0 })),
+    ]);
+
+    const executions = (execRes as any)?.data || [];
+    const schedules = (schedRes as any)?.data || [];
+    const agentCount = (readyRes as any)?.agents || 0;
+
+    setData({
+      health: healthRes,
+      agentCount,
+      execStats: {
+        total: executions.length,
+        running: executions.filter((e: any) => e.status === 'RUNNING').length,
+        completed: executions.filter((e: any) => e.status === 'COMPLETED').length,
+        failed: executions.filter((e: any) => e.status === 'FAILED').length,
+        pending: executions.filter((e: any) => ['PENDING', 'WAITING_APPROVAL'].includes(e.status)).length,
+      },
+      scheduleCount: schedules.length,
+    });
+  }, []);
 
   useEffect(() => {
-    checkRuntimeHealth().then(setHealth).catch(() => setHealth({ status: 'unreachable' }))
-    runtimeCall('GET', '/api/executions').then((res: any) => {
-      if (res?.data) {
-        const d = res.data
-        setExecStats({
-          total: d.length,
-          running: d.filter((e: any) => e.status === 'RUNNING').length,
-          completed: d.filter((e: any) => e.status === 'COMPLETED').length,
-          failed: d.filter((e: any) => e.status === 'FAILED').length,
-          pending: d.filter((e: any) => ['PENDING', 'WAITING_APPROVAL'].includes(e.status)).length,
-        })
-      }
-    }).catch(() => {})
-    runtimeCall('GET', '/api/schedules').then((res: any) => {
-      if (res?.data) setScheduleCount(res.data.length)
-    }).catch(() => {})
-    runtimeCall('GET', '/api/health/ready').then((res: any) => {
-      if (res?.agents) setAgentCount(res.agents)
-    }).catch(() => {})
-  }, [])
+    load();
+  }, [load]);
 
-  const ok = health?.status === 'ok'
-
-  const stats: Stat[] = [
-    { label: 'Runtime', value: health?.status || '…', color: ok ? 'text-green-600' : 'text-red-600' },
-    { label: 'Agents', value: agentCount, color: 'text-blue-600' },
-    { label: 'Running', value: execStats.running, color: 'text-amber-600' },
-    { label: 'Schedules', value: scheduleCount, color: 'text-purple-600' },
-  ]
+  const stats: Stat[] = useMemo(() => {
+    if (!data) return [];
+    const ok = data.health?.status === 'ok';
+    return [
+      { label: 'Runtime', value: data.health?.status || '\u2026', color: ok ? 'text-green-600' : 'text-red-600' },
+      { label: 'Agents', value: data.agentCount, color: 'text-blue-600' },
+      { label: 'Running', value: data.execStats.running, color: 'text-amber-600' },
+      { label: 'Schedules', value: data.scheduleCount, color: 'text-purple-600' },
+    ];
+  }, [data]);
 
   const cards = [
-    { title: 'Agents', desc: 'Deploy and manage AI agents', href: '/dashboard/agents', icon: '⚙' },
-    { title: 'Executions', desc: 'Monitor agent execution history', href: '/dashboard/executions', icon: '▶' },
-    { title: 'Scheduler', desc: 'Configure scheduled agent runs', href: '/dashboard/scheduler', icon: '⏰' },
-    { title: 'App Settings', desc: 'Configure runtime, ERP, MCP and notifications', href: '/dashboard/apps/settings', icon: '⚡' },
-  ]
+    { title: 'Agents', desc: 'Deploy and manage AI agents', href: '/dashboard/agents', icon: '\u2699' },
+    { title: 'Executions', desc: 'Monitor agent execution history', href: '/dashboard/executions', icon: '\u25B6' },
+    { title: 'Scheduler', desc: 'Configure scheduled agent runs', href: '/dashboard/scheduler', icon: '\u23F0' },
+    { title: 'App Settings', desc: 'Configure runtime, ERP, MCP and notifications', href: '/dashboard/apps/settings', icon: '\u26A1' },
+  ];
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-slate-900 mb-6">AI Box Overview</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-slate-200 bg-white p-5">
-            <p className="text-sm text-slate-500 mb-1">{s.label}</p>
-            <p className={`text-2xl font-bold ${s.color || 'text-slate-900'}`}>{String(s.value)}</p>
+      {data && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {stats.map((s) => (
+              <div key={s.label} className="rounded-xl border border-slate-200 bg-white p-5">
+                <p className="text-sm text-slate-500 mb-1">{s.label}</p>
+                <p className={`text-2xl font-bold ${s.color || 'text-slate-900'}`}>{String(s.value)}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500 mb-1">Total Executions</p>
-          <p className="text-2xl font-bold">{execStats.total}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500 mb-1">Completed</p>
-          <p className="text-2xl font-bold text-green-600">{execStats.completed}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500 mb-1">Failed</p>
-          <p className="text-2xl font-bold text-red-600">{execStats.failed}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500 mb-1">Pending / Waiting</p>
-          <p className="text-2xl font-bold text-yellow-600">{execStats.pending}</p>
-        </div>
-      </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-sm text-slate-500 mb-1">Total Executions</p>
+              <p className="text-2xl font-bold">{data.execStats.total}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-sm text-slate-500 mb-1">Completed</p>
+              <p className="text-2xl font-bold text-green-600">{data.execStats.completed}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-sm text-slate-500 mb-1">Failed</p>
+              <p className="text-2xl font-bold text-red-600">{data.execStats.failed}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-sm text-slate-500 mb-1">Pending / Waiting</p>
+              <p className="text-2xl font-bold text-yellow-600">{data.execStats.pending}</p>
+            </div>
+          </div>
+        </>
+      )}
 
       <h2 className="text-lg font-semibold text-slate-900 mb-3">Quick Links</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -99,5 +114,5 @@ export default function AppsPage() {
         ))}
       </div>
     </div>
-  )
+  );
 }

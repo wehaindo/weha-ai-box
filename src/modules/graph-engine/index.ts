@@ -9,6 +9,9 @@ import { loopNode } from './nodes/core/loop.node.js'
 import { parallelNode } from './nodes/core/parallel.node.js'
 import { delayNode } from './nodes/core/delay.node.js'
 import { waitNode } from './nodes/core/wait.node.js'
+import { subflowNode } from './nodes/core/subflow.node.js'
+import { humanInputNode } from './nodes/core/human-input.node.js'
+import { notificationNode } from './nodes/core/notification.node.js'
 
 // Utility nodes
 import { variableNode } from './nodes/utility/variable.node.js'
@@ -37,11 +40,18 @@ import { pushNode } from './nodes/communication/push.node.js'
 
 // AI nodes
 import { promptNode } from './nodes/ai/prompt.node.js'
+import { reasoningNode } from './nodes/ai/reasoning.node.js'
+import { summaryNode } from './nodes/ai/summary.node.js'
+import { classificationNode } from './nodes/ai/classification.node.js'
+
+// Knowledge nodes
+import { knowledgeSearchNode } from './nodes/knowledge/knowledge-search.node.js'
 
 export function registerCoreNodes() {
   const nodes = [
     // Core
     startNode, endNode, conditionNode, switchNode, loopNode, parallelNode, delayNode, waitNode,
+    subflowNode, humanInputNode, notificationNode,
     // Utility
     variableNode, transformNode, mathNode, jsonNode, dateNode,
     // Business
@@ -51,7 +61,9 @@ export function registerCoreNodes() {
     // Communication
     whotifNode, telegramNode, emailNode, webhookNode, pushNode,
     // AI
-    promptNode,
+    promptNode, reasoningNode, summaryNode, classificationNode,
+    // Knowledge
+    knowledgeSearchNode,
   ]
 
   for (const node of nodes) {

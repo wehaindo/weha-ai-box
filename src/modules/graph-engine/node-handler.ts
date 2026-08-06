@@ -1,9 +1,9 @@
-import type { AgentNode, ExecutionContext, NodeResult } from '../../types/index.js'
+import type { AgentNode, ExecutionContext, NodeResult, NodeConfig } from '../../types/index.js'
 
 export interface NodeHandler {
   type: string
   category: string
-  validate?(config: Record<string, unknown>): string[]
+  validate?(config: NodeConfig): string[]
   execute(context: ExecutionContext): Promise<NodeResult>
   rollback?(context: ExecutionContext): Promise<void>
 }

@@ -212,10 +212,17 @@ class SyncEngineService {
         await db.agent.upsert({
           where: { agentId: parsed.agent.agent.id },
           update: {
+            code: parsed.agent.agent.id,
             name: parsed.agent.agent.name,
             description: parsed.agent.agent.description,
+            type: parsed.agent.agent.type || 'custom',
             version: parsed.agent.version,
             definition: parsed.agent as unknown as Record<string, unknown>,
+            nodes: parsed.agent.nodes as any,
+            edges: parsed.agent.edges as any,
+            metadata: parsed.agent.metadata as any,
+            config: (parsed.agent as any).config || {},
+            settings: parsed.agent.settings as any,
             checksum: parsed.agent.checksum,
             signature: parsed.agent.signature,
             status: 'ACTIVE',
@@ -224,10 +231,17 @@ class SyncEngineService {
           },
           create: {
             agentId: parsed.agent.agent.id,
+            code: parsed.agent.agent.id,
             name: parsed.agent.agent.name,
             description: parsed.agent.agent.description,
+            type: parsed.agent.agent.type || 'custom',
             version: parsed.agent.version,
             definition: parsed.agent as unknown as Record<string, unknown>,
+            nodes: parsed.agent.nodes as any,
+            edges: parsed.agent.edges as any,
+            metadata: parsed.agent.metadata as any,
+            config: (parsed.agent as any).config || {},
+            settings: parsed.agent.settings as any,
             checksum: parsed.agent.checksum,
             signature: parsed.agent.signature,
             status: 'ACTIVE',
@@ -275,29 +289,41 @@ class SyncEngineService {
       let synced = 0
 
       for (const toolData of tools) {
-        const code = toolData.name || toolData.metadata?.code
+        const code = toolData.code || toolData.name || toolData.metadata?.code
         if (!code) continue
 
         const existing = await db.mcpTool.findFirst({
-          where: { name: code },
+          where: { code },
         })
 
         if (existing) {
           await db.mcpTool.update({
             where: { id: existing.id },
             data: {
+              code: toolData.code || toolData.name,
               description: toolData.description,
+              inputSchema: toolData.inputSchema || {},
+              outputSchema: toolData.outputSchema || {},
               schema: toolData.inputSchema || {},
+              executionType: toolData.executionType || existing.executionType,
               version: toolData.metadata?.version || existing.version,
+              status: toolData.status || existing.status,
+              categoryId: toolData.categoryId || existing.categoryId,
+              script: toolData.script || existing.script,
             },
           })
         } else {
           await db.mcpTool.create({
             data: {
               name: code,
+              code: toolData.code || toolData.name,
               description: toolData.description || '',
+              inputSchema: toolData.inputSchema || {},
+              outputSchema: toolData.outputSchema || {},
               schema: toolData.inputSchema || {},
               executionType: toolData.executionType || 'builtin',
+              status: toolData.status || 'ACTIVE',
+              version: toolData.metadata?.version || 1,
             },
           })
         }

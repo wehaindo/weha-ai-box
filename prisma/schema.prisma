@@ -18,6 +18,7 @@ enum ExecutionStatus {
   RUNNING
   PAUSED
   WAITING_APPROVAL
+  WAITING_INPUT
   COMPLETED
   FAILED
   CANCELLED
@@ -62,6 +63,25 @@ enum McpServerStatus {
   ERROR
 }
 
+enum McpToolStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  DEPRECATED
+}
+
+enum McpExecutionType {
+  SERVICE
+  WORKFLOW
+  REPORT
+  SQL
+  HTTP
+  WEBHOOK
+  COMPOSITE
+  SCRIPT
+  APPROVAL
+}
+
 enum CredentialType {
   API_KEY
   OAUTH
@@ -84,6 +104,13 @@ enum ScheduleType {
   WEBHOOK
 }
 
+enum AiBoxStatus {
+  ONLINE
+  OFFLINE
+  ERROR
+  DISCONNECTED
+}
+
 model AppConfig {
   id        String   @id @default(uuid())
   key       String   @unique
@@ -96,10 +123,17 @@ model AppConfig {
 model Agent {
   id            String      @id @default(uuid())
   agentId       String      @unique
+  code          String?
   name          String
+  type          String?
   description   String?
   version       Int         @default(1)
   definition    Json
+  nodes         Json?
+  edges         Json?
+  metadata      Json?
+  prompt        String?
+  config        Json?
   checksum      String
   signature     String?
   status        AgentStatus @default(ACTIVE)
@@ -111,6 +145,9 @@ model Agent {
   updatedAt     DateTime    @updatedAt
   executions    Execution[]
   schedules     Schedule[]
+  permissions   McpAgentPermission[]
+  versions      AiAgentVersion[]
+  deployments   AiAgentDeployment[]
 }
 
 model Execution {
@@ -118,11 +155,19 @@ model Execution {
   executionId   String          @unique
   agentId       String
   agent         Agent           @relation(fields: [agentId], references: [agentId])
+  toolId        String?
+  version       Int?
   status        ExecutionStatus @default(PENDING)
   trigger       TriggerType
   input         Json?
   output        Json?
   error         Json?
+  duration      Int             @default(0)
+  tokenUsage    Int             @default(0)
+  creditUsage   Float           @default(0)
+  source        String?
+  conversationId String?
+  executedBy    String?
   startedAt     DateTime?
   completedAt   DateTime?
   createdAt     DateTime        @default(now())
@@ -146,6 +191,7 @@ model ExecutionLog {
   id          String   @id @default(uuid())
   executionId String
   execution   Execution @relation(fields: [executionId], references: [id])
+  step        Int      @default(0)
   nodeId      String?
   nodeType    String?
   level       LogLevel @default(INFO)
@@ -156,11 +202,13 @@ model ExecutionLog {
 
 model Schedule {
   id          String       @id @default(uuid())
-  agentId     String
-  agent       Agent        @relation(fields: [agentId], references: [agentId])
+  agentId     String?
+  agent       Agent?       @relation(fields: [agentId], references: [agentId])
+  toolId      String?
   name        String
   type        ScheduleType
   cron        String?
+  timezone    String       @default("UTC")
   startAt     DateTime?
   endAt       DateTime?
   lastRunAt   DateTime?
@@ -169,6 +217,8 @@ model Schedule {
   config      Json?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
+  createdBy   String?
+  updatedBy   String?
 }
 
 model Plugin {
@@ -188,24 +238,291 @@ model McpServer {
   id                String          @id @default(uuid())
   name              String          @unique
   url               String
+  apiKey            String?
   description       String?
   config            Json?
   status            McpServerStatus @default(CONNECTED)
+  isActive          Boolean         @default(true)
   lastHealthCheckAt DateTime?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+  createdBy         String?
+  updatedBy         String?
   tools             McpTool[]
 }
 
 model McpTool {
-  id          String   @id @default(uuid())
-  serverId    String
-  server      McpServer @relation(fields: [serverId], references: [id])
-  name        String
-  description String?
-  schema      Json
-  createdAt   DateTime @default(now())
+  id              String           @id @default(uuid())
+  serverId        String?
+  server          McpServer?       @relation(fields: [serverId], references: [id])
+  code            String?
+  name            String
+  description     String?
+  executionType   McpExecutionType?
+  categoryId      String?
+  status          McpToolStatus    @default(ACTIVE)
+  config          Json?
+  inputSchema     Json?
+  outputSchema    Json?
+  script          String?
+  schema          Json?
+  version         Int              @default(1)
+  lastTestedAt    DateTime?
+  lastTestedBy    String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  createdBy       String?
+  updatedBy       String?
+  versions        McpToolVersion[]
+  parameters      McpToolParameter[]
+  permissions     McpToolPermission[]
+  webhooks        McpToolWebhook[]
+  tags            McpToolTag[]
+  compositeTools  McpCompositeTool[]
+  agentPermissions McpAgentPermission[]
+  executions      ToolExecution[]
+
   @@unique([serverId, name])
+}
+
+model ToolExecution {
+  id            String          @id @default(uuid())
+  toolId        String
+  tool          McpTool         @relation(fields: [toolId], references: [id])
+  agentId       String?
+  status        ExecutionStatus @default(PENDING)
+  input         Json?
+  output        Json?
+  error         Json?
+  duration      Int             @default(0)
+  tokenUsage    Int             @default(0)
+  creditUsage   Float           @default(0)
+  executedBy    String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model McpToolVersion {
+  id           String   @id @default(uuid())
+  toolId       String
+  tool         McpTool  @relation(fields: [toolId], references: [id])
+  version      Int
+  config       Json     @default("{}")
+  inputSchema  Json     @default("{}")
+  outputSchema Json     @default("{}")
+  script       String?
+  changelog    String?
+  publishedBy  String?
+  publishedAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@unique([toolId, version])
+}
+
+model McpToolParameter {
+  id          String   @id @default(uuid())
+  toolId      String
+  tool        McpTool  @relation(fields: [toolId], references: [id])
+  key         String
+  label       String?
+  type        String
+  required    Boolean  @default(false)
+  default     String?
+  enumValues  Json?
+  schema      Json?
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model McpToolPermission {
+  id       String  @id @default(uuid())
+  toolId   String
+  tool     McpTool @relation(fields: [toolId], references: [id])
+  roleId   String?
+  userId   String?
+  agentType String?
+  createdAt DateTime @default(now())
+  createdBy String?
+}
+
+model McpToolWebhook {
+  id              String   @id @default(uuid())
+  toolId          String
+  tool            McpTool  @relation(fields: [toolId], references: [id])
+  url             String
+  method          String   @default("POST")
+  headers         Json     @default("{}")
+  payloadTemplate Json?
+  enabled         Boolean  @default(true)
+  retryCount      Int      @default(3)
+  timeout         Int      @default(30000)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String?
+  updatedBy       String?
+}
+
+model McpToolTag {
+  id        String   @id @default(uuid())
+  toolId    String
+  tool      McpTool  @relation(fields: [toolId], references: [id])
+  tag       String
+  createdAt DateTime @default(now())
+
+  @@unique([toolId, tag])
+}
+
+model McpToolCategory {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  description String?
+  parentId    String?
+  parent      McpToolCategory? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    McpToolCategory[] @relation("CategoryHierarchy")
+  color       String?
+  icon        String?
+  sortOrder   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  createdBy   String?
+  updatedBy   String?
+}
+
+model McpCompositeTool {
+  id        String   @id @default(uuid())
+  toolId    String   @unique
+  tool      McpTool  @relation(fields: [toolId], references: [id])
+  nodes     Json     @default("[]")
+  edges     Json     @default("[]")
+  config    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+  updatedBy String?
+}
+
+model McpServiceRegistry {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  name         String
+  module       String?
+  description  String?
+  inputSchema  Json     @default("{}")
+  outputSchema Json     @default("{}")
+  endpoint     String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    String?
+  updatedBy    String?
+}
+
+model McpWorkflowRegistry {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  name          String
+  module        String?
+  description   String?
+  triggerAction String?
+  inputSchema   Json     @default("{}")
+  outputSchema  Json     @default("{}")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     String?
+  updatedBy     String?
+}
+
+model McpAgentPermission {
+  id         String   @id @default(uuid())
+  agentId    String
+  agent      Agent    @relation(fields: [agentId], references: [agentId])
+  toolId     String
+  tool       McpTool  @relation(fields: [toolId], references: [id])
+  conditions Json?
+  createdAt  DateTime @default(now())
+  createdBy  String?
+
+  @@unique([agentId, toolId])
+}
+
+model McpPromptTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  description String?
+  content     String
+  variables   Json     @default("[]")
+  category    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String?
+  updatedBy   String?
+}
+
+model AiAgentVersion {
+  id          String    @id @default(uuid())
+  agentId     String
+  agent       Agent     @relation(fields: [agentId], references: [agentId])
+  version     Int
+  nodes       Json      @default("[]")
+  edges       Json      @default("[]")
+  settings    Json      @default("{}")
+  metadata    Json      @default("{}")
+  prompt      String?
+  changelog   String?
+  publishedBy String?
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([agentId, version])
+}
+
+model AiAgentDeployment {
+  id              String   @id @default(uuid())
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [agentId])
+  version         Int
+  status          String
+  config          Json     @default("{}")
+  deployedBy      String?
+  deployedAt      DateTime?
+  rolledBackAt    DateTime?
+  rollbackReason  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AiBox {
+  id              String       @id @default(uuid())
+  code            String       @unique
+  name            String
+  description     String?
+  status          AiBoxStatus  @default(OFFLINE)
+  version         String?
+  lastHeartbeatAt DateTime?
+  lastSyncAt      DateTime?
+  config          Json         @default("{}")
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  heartbeats      AiBoxHeartbeat[]
+}
+
+model AiBoxHeartbeat {
+  id        String   @id @default(uuid())
+  aiBoxId   String
+  aiBox     AiBox    @relation(fields: [aiBoxId], references: [id])
+  status    String
+  metrics   Json?
+  ipAddress String?
+  version   String?
+  timestamp DateTime @default(now())
 }
 
 model CredentialVault {
@@ -255,6 +572,7 @@ model AiUsage {
   id          String   @id @default(uuid())
   executionId String?
   agentId     String?
+  toolId      String?
   userId      String?
   provider    String
   model       String
@@ -263,4 +581,35 @@ model AiUsage {
   creditsUsed Float    @default(0)
   duration    Int      @default(0)
   timestamp   DateTime @default(now())
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+  TOOL
+  SYSTEM
+}
+
+model Conversation {
+  id        String        @id @default(uuid())
+  title     String        @default("New Chat")
+  userId    String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  role           ChatRole
+  content        String       @default("")
+  toolCalls      Json?
+  toolResults    Json?
+  tokenUsage     Int          @default(0)
+  model          String?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
 }

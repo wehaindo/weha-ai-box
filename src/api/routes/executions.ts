@@ -7,7 +7,7 @@ export async function executionRoutes(app: FastifyInstance) {
     schema: {
       body: {
         type: 'object',
-        required: ['agentId', 'agentDefinition'],
+        required: ['agentId'],
         properties: {
           agentId: { type: 'string' },
           agentDefinition: { type: 'object' },
@@ -19,10 +19,26 @@ export async function executionRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { agentId, agentDefinition, trigger, input } = request.body as any
 
+      let definition = agentDefinition
+      if (!definition) {
+        const db = databaseService.getClient()
+        const agent = await db.agent.findUnique({ where: { agentId } })
+        if (!agent) {
+          reply.code(404)
+          return { error: `Agent not found: ${agentId}` }
+        }
+        if (!agent.definition) {
+          reply.code(400)
+          return { error: `Agent ${agentId} has no definition` }
+        }
+        definition = agent.definition
+      }
+
       const db = databaseService.getClient()
+      const executionId = `exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       const execution = await db.execution.create({
         data: {
-          executionId: `exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          executionId,
           agentId,
           status: 'RUNNING',
           trigger: trigger || 'MANUAL',
@@ -30,12 +46,12 @@ export async function executionRoutes(app: FastifyInstance) {
         },
       })
 
-      graphExecutor.execute(agentDefinition, execution.executionId, trigger || 'MANUAL', input || {})
+      graphExecutor.execute(definition, executionId, trigger || 'MANUAL', input || {})
         .then((result) => {
-          console.log(`Execution ${execution.executionId} completed:`, result.success ? 'OK' : 'FAIL')
+          console.log(`Execution ${executionId} completed:`, result.success ? 'OK' : 'FAIL')
         })
         .catch((err) => {
-          console.error(`Execution ${execution.executionId} error:`, err)
+          console.error(`Execution ${executionId} error:`, err)
         })
 
       reply.code(201)

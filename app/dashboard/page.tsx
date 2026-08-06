@@ -1,57 +1,36 @@
-'use client'
+'use client';
 
-import { useState, useEffect, useRef } from 'react'
-import Link from 'next/link'
-import { getConfig, runtimeCall } from '@/lib/device-config'
-import type { DeviceConfig } from '@/lib/device-config'
+import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { getConfig, runtimeCall } from '@/lib/device-config';
+import { LiveClock } from '@/components/live-clock';
+import type { DeviceConfig } from '@/lib/device-config';
 
 export default function DashboardPage() {
-  const [config, setConfig] = useState<DeviceConfig | null>(null)
-  const [time, setTime] = useState(new Date())
-  const erpConfigured = useRef(false)
+  const [config, setConfig] = useState<DeviceConfig | null>(null);
+  const erpConfigured = useRef(false);
 
   useEffect(() => {
     getConfig().then((cfg) => {
-      setConfig(cfg)
-      // Auto-configure runtime ERP from stored credentials on boot
+      setConfig(cfg);
       if (cfg.deviceToken && cfg.tenantId && cfg.serverUrl && !erpConfigured.current) {
-        erpConfigured.current = true
+        erpConfigured.current = true;
         runtimeCall('POST', '/api/erp/configure', {
           serverUrl: cfg.serverUrl,
           deviceToken: cfg.deviceToken,
           tenantId: cfg.tenantId,
           deviceId: cfg.deviceId,
           deviceCode: cfg.deviceCode,
-        }).catch((err) => console.warn('Boot ERP auto-config:', err.message))
+        }).catch((err) => console.warn('Boot ERP auto-config:', err.message));
       }
-    })
-  }, [])
+    });
+  }, []);
 
-  useEffect(() => {
-    const id = setInterval(() => setTime(new Date()), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  const dateStr = time.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
-
-  const timeStr = time.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  })
-
-  const deviceName = config?.deviceName
-  const storeName = config?.storeName
+  const deviceName = config?.deviceName;
+  const storeName = config?.storeName;
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 relative">
-      {/* Settings gear */}
       <Link
         href="/dashboard/settings"
         className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-700 transition-colors"
@@ -63,24 +42,13 @@ export default function DashboardPage() {
         </svg>
       </Link>
 
-      {/* Center content */}
       <div className="flex flex-1 flex-col items-center justify-center px-6">
         <div className="text-center space-y-6">
-          {/* Time */}
-          <div className="text-7xl sm:text-8xl font-bold text-slate-900 tabular-nums tracking-tight">
-            {timeStr}
-          </div>
-
-          {/* Date */}
-          <div className="text-xl sm:text-2xl text-slate-500 font-medium">
-            {dateStr}
-          </div>
-
-          {/* Continue button */}
+          <LiveClock />
           <div className="pt-4">
             <Link
               href="/dashboard/apps"
-              className="inline-block rounded-xl bg-blue-600 px-12 py-4 text-lg font-semibold text-white hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-lg shadow-blue-600/25"
+              className="inline-block rounded-xl bg-amber-500 px-12 py-4 text-lg font-semibold text-white hover:bg-amber-600 active:bg-amber-700 transition-colors shadow-lg shadow-amber-500/25"
             >
               Continue
             </Link>
@@ -88,12 +56,11 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Device info footer */}
       {deviceName && (
         <div className="pb-6 text-center text-sm text-slate-400">
           Device · {deviceName}{storeName ? ` — ${storeName}` : ''}
         </div>
       )}
     </div>
-  )
+  );
 }

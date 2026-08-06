@@ -11,6 +11,7 @@ export async function healthRoutes(app: FastifyInstance) {
             status: { type: 'string' },
             uptime: { type: 'number' },
             database: { type: 'string' },
+            version: { type: 'string' },
             timestamp: { type: 'string' },
           },
         },
@@ -22,6 +23,7 @@ export async function healthRoutes(app: FastifyInstance) {
         status: 'ok',
         uptime: process.uptime(),
         database: dbStatus ? 'connected' : 'disconnected',
+        version: process.env.npm_package_version || '1.0.0',
         timestamp: new Date().toISOString(),
       }
     },
