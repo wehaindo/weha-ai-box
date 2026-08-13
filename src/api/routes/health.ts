@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { databaseService } from '../../modules/database/database.service.js'
+import { natsGatewayService } from '../../modules/nats/nats-gateway.service.js'
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get('/api/health', {
@@ -37,6 +38,12 @@ export async function healthRoutes(app: FastifyInstance) {
         return { status: 'not ready', database: 'disconnected' }
       }
       return { status: 'ready', database: 'connected' }
+    },
+  })
+
+  app.get('/api/health/gateway', {
+    handler: async () => {
+      return { data: { transport: 'nats', connected: natsGatewayService.isConnected() } }
     },
   })
 }

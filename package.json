@@ -16,7 +16,8 @@
     "db:generate": "prisma generate --config prisma/prisma.config.ts",
     "db:migrate": "prisma migrate dev --config prisma/prisma.config.ts",
     "db:push": "prisma db push --config prisma/prisma.config.ts",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "simulate:whotif": "tsx scripts/simulate-whotif-message.ts"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -44,6 +45,7 @@
     "framer-motion": "^12.42.2",
     "idb": "^8.0.3",
     "lucide-react": "^1.17.0",
+    "nats": "^2.29.3",
     "next": "15.3.1",
     "pg": "^8.x",
     "pino": "^9.x",

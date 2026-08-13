@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { runtimeCall, setConfigField } from '@/lib/device-config'
+import { runtimeCall, setConfigField, getConfig } from '@/lib/device-config'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,6 +29,14 @@ export default function AppSettingsPage() {
   const [syncResult, setSyncResult] = useState<string>('')
   const [mcpServers, setMcpServers] = useState<any[]>([])
   const [loadingMcp, setLoadingMcp] = useState(false)
+
+  useEffect(() => {
+    getConfig().then((cfg) => {
+      if (cfg.runtimeUrl) setRuntimeUrl(cfg.runtimeUrl)
+      setAiEnabled(cfg.aiEnabled)
+      setAgentSyncEnabled(cfg.agentSyncEnabled)
+    }).catch(() => {})
+  }, [])
 
   async function handleSaveGeneral(e: React.FormEvent) {
     e.preventDefault()

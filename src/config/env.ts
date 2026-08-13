@@ -23,6 +23,9 @@ const envSchema = z.object({
   LLM_FALLBACK_URL: z.string().optional(),
   LLM_FALLBACK_KEY: z.string().optional(),
   LLM_FALLBACK_MODEL: z.string().optional(),
+  NATS_URL: z.string().optional(),
+  NATS_USER: z.string().optional(),
+  NATS_PASS: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
