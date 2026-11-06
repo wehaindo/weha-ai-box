@@ -1,0 +1,72 @@
+services:
+  migrate:
+    build:
+      context: .
+      target: migrator
+    image: ghcr.io/wehaindo/weha-ai-box-migrate:${TAG:-latest}
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    command: sh -c "npx prisma db push --config=prisma/prisma.config.ts --accept-data-loss && npx tsx prisma/seed.ts"
+    extra_hosts:
+      - "localhost:host-gateway"
+    restart: "no"
+
+  runtime:
+    build:
+      context: .
+      target: runtime
+    image: ghcr.io/wehaindo/weha-ai-box-runtime:${TAG:-latest}
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_HOST=0.0.0.0
+      - RUNTIME_PORT=${RUNTIME_PORT:-4000}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - LLM_FALLBACK_URL=${LLM_FALLBACK_URL:-}
+      - LLM_FALLBACK_KEY=${LLM_FALLBACK_KEY:-}
+      - LLM_FALLBACK_MODEL=${LLM_FALLBACK_MODEL:-}
+      - NATS_URL=${NATS_URL:-}
+      - NATS_USER=${NATS_USER:-}
+      - NATS_PASS=${NATS_PASS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "localhost:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: runner
+    image: ghcr.io/wehaindo/weha-ai-box:${TAG:-latest}
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - RUNTIME_URL=http://runtime:${RUNTIME_PORT:-4000}
+    depends_on:
+      runtime:
+        condition: service_healthy
+    extra_hosts:
+      - "localhost:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

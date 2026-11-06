@@ -50,6 +50,57 @@ sudo systemctl enable --now weha-runtime weha-web
 - Open `http://<box-ip>:3000` from any device on the network
 - First-run: paste the activation token at `/register`, then log in at `/login`
 
+## Docker Compose
+
+An alternative to systemd: `Dockerfile`, `docker-compose.yml` and `.dockerignore` in the repo
+root, modeled after weha-admin. Images are published to GHCR by `.github/workflows/docker-publish.yml`:
+
+- `ghcr.io/wehaindo/weha-ai-box:latest` — web console (Next.js, target `runner`)
+- `ghcr.io/wehaindo/weha-ai-box-runtime:latest` — runtime (Fastify, target `runtime`)
+- `ghcr.io/wehaindo/weha-ai-box-migrate:latest` — migrations/seed (target `migrator`)
+
+The stack keeps PostgreSQL/Redis external — set `DATABASE_URL` (and `REDIS_URL` if used)
+to your existing instances. Postgres must be reachable from the container.
+
+### Deploy
+
+1. Create a `.env` next to `docker-compose.yml` (copy the shape from `.env.example`):
+
+   ```bash
+   DATABASE_URL="postgresql://user:password@db-host:5432/weha_ai_box"
+   JWT_SECRET="<random-string-at-least-16-chars>"
+   ENCRYPTION_KEY="<random-32-byte-hex-key>"
+   LLM_API_KEY="sk-..."
+   NATS_URL="nats://gateway-host:4222"
+   NATS_USER="admin"
+   NATS_PASS="..."
+   PORT=3000
+   ```
+
+2. Pull and start (requires the images to be public, or `docker login ghcr.io`):
+
+   ```bash
+   docker compose pull
+   docker compose up -d
+   ```
+
+   Or build directly on the box:
+
+   ```bash
+   docker compose build
+   docker compose up -d
+   ```
+
+   The `migrate` service runs `prisma db push` + seed once, then `runtime` starts, then `web`
+   (only the web console is exposed on `PORT`; the runtime stays internal on the compose network).
+
+### Troubleshooting
+
+- **`DATABASE_URL variable is not set`** → the host `.env` is missing or empty.
+- **`denied`** → GHCR package is private; make it public or run `docker login ghcr.io`.
+- **web shows runtime unreachable** → check `docker compose logs runtime`; the rewrite target is
+  `RUNTIME_URL` (defaults to `http://runtime:4000` inside compose, `http://127.0.0.1:4000` locally).
+
 ## Useful commands
 
 ```bash
