@@ -12,9 +12,14 @@ class CheckpointService {
   async save(data: CheckpointData) {
     try {
       const db = databaseService.getClient()
+      const execution = await db.execution.findUnique({
+        where: { executionId: data.executionId },
+        select: { id: true },
+      })
+      if (!execution) return
       await db.checkpoint.create({
         data: {
-          executionId: data.executionId,
+          executionId: execution.id,
           nodeId: data.nodeId,
           nodeType: data.nodeType,
           state: data.state,
@@ -29,8 +34,13 @@ class CheckpointService {
   async getLatest(executionId: string) {
     try {
       const db = databaseService.getClient()
-      return await db.checkpoint.findFirst({
+      const execution = await db.execution.findUnique({
         where: { executionId },
+        select: { id: true },
+      })
+      if (!execution) return null
+      return await db.checkpoint.findFirst({
+        where: { executionId: execution.id },
         orderBy: { createdAt: 'desc' },
       })
     } catch {
@@ -41,8 +51,13 @@ class CheckpointService {
   async list(executionId: string) {
     try {
       const db = databaseService.getClient()
-      return await db.checkpoint.findMany({
+      const execution = await db.execution.findUnique({
         where: { executionId },
+        select: { id: true },
+      })
+      if (!execution) return []
+      return await db.checkpoint.findMany({
+        where: { executionId: execution.id },
         orderBy: { createdAt: 'asc' },
       })
     } catch {

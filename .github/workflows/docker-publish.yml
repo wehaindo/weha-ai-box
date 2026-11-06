@@ -1,0 +1,108 @@
+name: docker-publish
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (overrides default)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/wehaindo
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: meta
+        run: |
+          IMAGES=""
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            IMAGES="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            IMAGES="${{ github.ref_name }}"
+          else
+            IMAGES="latest"
+          fi
+          echo "tags=$IMAGES" >> "$GITHUB_OUTPUT"
+          echo "sha-tags=sha-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrator
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/weha-ai-box-migrate:${{ steps.meta.outputs.tags }}
+            ${{ env.IMAGE_BASE }}/weha-ai-box-migrate:${{ steps.meta.outputs.sha-tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/weha-ai-box-runtime:${{ steps.meta.outputs.tags }}
+            ${{ env.IMAGE_BASE }}/weha-ai-box-runtime:${{ steps.meta.outputs.sha-tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/weha-ai-box:${{ steps.meta.outputs.tags }}
+            ${{ env.IMAGE_BASE }}/weha-ai-box:${{ steps.meta.outputs.sha-tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # GITHUB_TOKEN cannot change visibility of user-scoped packages, so use a
+      # PAT (GH_PAT, write:packages) when configured; otherwise fall back and warn.
+      - name: Make packages public
+        continue-on-error: true
+        run: |
+          for pkg in weha-ai-box-migrate weha-ai-box-runtime weha-ai-box; do
+            if gh api "/orgs/${{ github.repository_owner }}/packages/container/$pkg" --silent 2>/dev/null; then
+              gh api -X PATCH "/orgs/${{ github.repository_owner }}/packages/container/$pkg" -f visibility=public --silent \
+                && echo "made public (org): $pkg" || echo "WARN: could not set org visibility for $pkg"
+            elif gh api "/user/packages/container/$pkg" --silent 2>/dev/null; then
+              gh api -X PATCH "/user/packages/container/$pkg" -f visibility=public --silent \
+                && echo "made public (user): $pkg" || echo "WARN: could not set user visibility for $pkg (set manually or add GH_PAT)"
+            else
+              echo "WARN: package $pkg not found via API - set visibility manually on GitHub"
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}

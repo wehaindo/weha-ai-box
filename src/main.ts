@@ -10,6 +10,7 @@ import { syncEngineService, licenseService } from './modules/sync-engine/index.j
 import { erpAuthService } from './modules/erp-connector/erp-auth.service.js'
 import { llmProvider } from './modules/llm/llm-provider.service.js'
 import { deviceConfigService } from './modules/device-config/device-config.service.js'
+import { natsGatewayService } from './modules/nats/nats-gateway.service.js'
 
 async function main() {
   console.log('Starting WEHA AI Box Runtime...')
@@ -37,6 +38,9 @@ async function main() {
   licenseService.configure()
   licenseService.start()
 
+  // Connect to the WEHA Platform Gateway NATS routing hub (commands + heartbeats)
+  natsGatewayService.start()
+
   const app = await buildApp()
 
   await app.listen({ port: env.RUNTIME_PORT, host: env.RUNTIME_HOST })
@@ -46,4 +50,13 @@ async function main() {
 main().catch((err) => {
   console.error('Failed to start runtime:', err)
   process.exit(1)
+})
+
+process.on('SIGINT', () => {
+  natsGatewayService.stop()
+  process.exit(0)
+})
+process.on('SIGTERM', () => {
+  natsGatewayService.stop()
+  process.exit(0)
 })

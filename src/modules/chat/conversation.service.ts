@@ -22,13 +22,24 @@ export interface MessageRecord {
 }
 
 export class ConversationService {
-  async createConversation(title?: string): Promise<{ id: string; title: string; createdAt: Date; updatedAt: Date }> {
+  async createConversation(title?: string, userId?: string): Promise<{ id: string; title: string; createdAt: Date; updatedAt: Date }> {
     const db = databaseService.getClient()
     return await db.conversation.create({
       data: {
         title: title || 'New Chat',
+        ...(userId ? { userId } : {}),
       },
       select: { id: true, title: true, createdAt: true, updatedAt: true },
+    })
+  }
+
+  /** Find a conversation by its external key (e.g. a WHOTIF conversation id). */
+  async getConversationByUserId(userId: string): Promise<{ id: string } | null> {
+    const db = databaseService.getClient()
+    return await db.conversation.findFirst({
+      where: { userId },
+      select: { id: true },
+      orderBy: { updatedAt: 'desc' },
     })
   }
 
